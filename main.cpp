@@ -44,6 +44,18 @@ void lldb_stuff(const std::string& path, lldb::pid_t pid, ProcessData& data) {
         std::cerr << "Memory read error: " << error.GetCString() << std::endl;
         // Handle error
     }
+
+    buffer[0] = 1;
+    process.WriteMemory(address, buffer, size, error);
+
+    // Check for write error
+    if (error.Fail()) {
+        std::cerr << "Memory write error: " << error.GetCString() << std::endl;
+        // Handle error
+    }
+
+    // Clean up
+    lldb::SBDebugger::Destroy(debugger);
 }
 
 pid_t launch(const std::string& path) {
@@ -115,6 +127,10 @@ ProcessData receive_tracee_data() {
         buffer[count] = '\0';
         receivedData += buffer;
         break;
+    }
+
+    if (count == 0) {
+        return data;
     }
 
     std::cout << "Received from tracee: " << receivedData << std::endl;
