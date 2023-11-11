@@ -1,9 +1,7 @@
 #include <iostream>
 #include <stdexcept>
-#include <fstream>
 #include <sstream>
-#include <sys/types.h>
-#include <mach/mach.h>
+
 #include <unistd.h>
 
 #include <lldb/API/LLDB.h>
@@ -11,10 +9,10 @@
 int fd[2];
 
 struct ProcessData {
-    vm_address_t address = 0;
-    vm_size_t size = 0;
-    vm_offset_t data = 0;
-    mach_msg_type_number_t dataCnt = 0;
+    uintptr_t address = 0;
+    uintptr_t size = 0;
+    uintptr_t data = 0;
+    unsigned int dataCnt = 0;
 };
 
 void lldb_stuff(const std::string& path, lldb::pid_t pid, ProcessData& data) {
@@ -88,35 +86,6 @@ pid_t launch(const std::string& path) {
     }
 }
 
-mach_port_t request_task(pid_t pid) {
-    mach_port_t port;
-    kern_return_t kr = task_for_pid(mach_task_self(), pid, &port);
-    if (kr != KERN_SUCCESS) {
-        throw std::runtime_error("Could not request a task");
-    }
-
-    std::cout << "task port: " << port << std::endl;
-
-    return port;
-}
-
-void read(mach_port_t port, ProcessData& data) {
-    std::cout << "Attempting to read " << data.address << " from port " << port << std::endl;
-    kern_return_t kr = vm_read(port, data.address, data.size, &data.data, &data.dataCnt);
-    if (kr != KERN_SUCCESS) {
-        std::cout << "read error! " << mach_error_string(kr) << std::endl;
-        // Handle error
-    }
-}
-
-void write(mach_port_t port, const ProcessData& data) {
-    kern_return_t kr = vm_write(port, data.address, data.data, data.dataCnt);
-    if (kr != KERN_SUCCESS) {
-        std::cout << "write error! " << mach_error_string(kr) << std::endl;
-        // Handle error
-    }
-}
-
 ProcessData receive_tracee_data() {
     ProcessData data;
 
@@ -156,14 +125,11 @@ int main(int argc, char** argv) {
 
     std::string executable_path = argv[1];
     auto pid = launch(executable_path);
-    //auto port = request_task(pid);
 
     while (true) {
         auto data = receive_tracee_data();
         if (data.address) {
             lldb_stuff(executable_path, pid, data);
-            //read(port, data);
-            //write(port, data);
         }
     }
 }
