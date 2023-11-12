@@ -1,1 +1,1 @@
-g++ -std=c++20 -o hook main.cpp -I/Users/alexander.bolinsky/Dev/llvm-project/lldb/include/ -L /Users/alexander.bolinsky/Dev/lldb/build/lib -llldb
+g++ -std=c++20 -g -o hook main.cpp -I/usr/local/include/lldb/ -L/usr/local/lib/lldb/ -llldb -Wl,-rpath,/usr/local/lib/lldb
