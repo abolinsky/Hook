@@ -26,18 +26,6 @@ lldb::SBProcess process;
 
 GLFWwindow* window = nullptr;
 
-void ContinueProcess(lldb::SBProcess& process) {
-    if (process.GetState() == lldb::eStateStopped) {
-        process.Continue();
-
-        if (process.GetState() != lldb::eStateRunning) {
-            std::cerr << "Failed to continue the process." << std::endl;
-        }
-    } else {
-        std::cerr << "Process is not in a stopped state." << std::endl;
-    }
-}
-
 void FetchAllVariables() {
     variables.clear();
 
@@ -83,34 +71,6 @@ void FetchAllVariables() {
     }
 }
 
-void FetchVariableValue(VariableInfo& var_info) {
-    process.Stop();
-
-    lldb::SBThread thread = process.GetSelectedThread();
-    if (!thread.IsValid()) {
-        std::cerr << "Failed to get thread" << std::endl;
-        return;
-    }
-
-    lldb::SBFrame frame = thread.GetSelectedFrame();
-    if (!frame.IsValid()) {
-        std::cerr << "Failed to get frame" << std::endl;
-        return;
-    }
-
-    std::cout << var_info.name << " " << var_info.value << std::endl;
-    lldb::SBValue value = frame.EvaluateExpression(var_info.name.c_str());
-    if (value.IsValid()) {
-        std::cout << "Expression Result: " << value.GetValue() << std::endl;
-        var_info.value = std::string(value.GetValue());
-        var_info.isLocked = true;
-    } else {
-        std::cerr << "Failed to evaluate expression" << std::endl;
-    }
-
-    ContinueProcess(process);
-}
-
 void UpdateVariableValue(VariableInfo& var_info) {
     process.Stop();
     
@@ -154,7 +114,7 @@ void UpdateVariableValue(VariableInfo& var_info) {
         }
     }
 
-    ContinueProcess(process);
+    process.Continue();
 }
 
 void lldb_stuff(const std::string& path, lldb::pid_t pid) {
@@ -229,17 +189,7 @@ int main(int argc, char** argv) {
         ImGui::Begin("Variables");
 
         for (auto& var_info : variables) {
-            if (!var_info.isLocked) {
-                // Allow the user to enter a variable name
-                std::string label = "##varname" + var_info.name;
-                ImGui::InputText(label.c_str(), &var_info.name);
-                if (ImGui::IsItemDeactivatedAfterEdit()) {
-                    std::cout << var_info.name << " " << var_info.value << std::endl;
-                    FetchVariableValue(var_info);
-                    std::cout << var_info.name << " " << var_info.value << std::endl;
-                }
-            } else {
-                // Display the locked variable name and its value
+            if (var_info.isLocked) {
                 ImGui::Text("%s =", var_info.name.c_str());
                 ImGui::SameLine();
                 std::string label = "##varname" + var_info.name;
