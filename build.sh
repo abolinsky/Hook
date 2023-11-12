@@ -1,1 +1,1 @@
-g++ -std=c++20 -g -o hook main.cpp -I/usr/local/include/lldb/ -L/usr/local/lib/lldb/ -llldb -Wl,-rpath,/usr/local/lib/lldb
+g++ -std=c++20 -g -o hook main.cpp dependencies/imgui/*cpp dependencies/imgui/backends/*cpp -Idependencies/imgui/ -Idependencies/imgui/backends -I/opt/homebrew/Cellar/glfw/3.3.8/include -L/opt/homebrew/Cellar/glfw/3.3.8/lib -I/usr/local/include/lldb/ -L/usr/local/lib/lldb/ -lglfw -llldb -Wl,-rpath,/usr/local/lib/lldb
