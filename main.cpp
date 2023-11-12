@@ -1,34 +1,32 @@
 #include "imgui.h"
+#include "imgui_stdlib.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
-#include <GLFW/glfw3.h>
 
 #include <iostream>
+#include <unordered_map>
+#include <string>
+
+#include <GLFW/glfw3.h>
 #include <lldb/API/LLDB.h>
 
+struct VariableInfo {
+    std::string name;
+    std::string value;
+    bool isLocked = false;
+};
+
+std::vector<VariableInfo> variables;
+
 lldb::SBDebugger debugger;
+lldb::SBTarget target;
+lldb::SBListener listener;
+lldb::SBError error;
+lldb::SBProcess process;
 
-void lldb_stuff(const std::string& path, lldb::pid_t pid) {
-    lldb::SBDebugger::Initialize();
-    debugger = lldb::SBDebugger::Create();
-
-    lldb::SBTarget target = debugger.CreateTargetWithFileAndArch(path.c_str(), nullptr);
-
-    lldb::SBListener listener;
-    lldb::SBError error;
-    lldb::SBProcess process = target.AttachToProcessWithID(listener, pid, error);
-
-    // Check if the process is successfully attached
-    if (!process.IsValid() || error.Fail()) {
-        std::cerr << "Failed to attach to process: " << error.GetCString() << std::endl;
-        // Handle error
-    }
-
-    //process.Stop();
-
+void FetchVariableValue(VariableInfo& varInfo) {
     lldb::SBThread thread = process.GetSelectedThread();
     if (!thread.IsValid()) {
-        // TODO handle
         std::cerr << "Failed to get thread" << std::endl;
         lldb::SBDebugger::Destroy(debugger);
         return;
@@ -41,28 +39,63 @@ void lldb_stuff(const std::string& path, lldb::pid_t pid) {
         return;
     }
 
-    lldb::SBValue value = frame.EvaluateExpression("stop");
+    lldb::SBValue value = frame.EvaluateExpression(varInfo.name.c_str());
     if (value.IsValid()) {
         std::cout << "Expression Result: " << value.GetValue() << std::endl;
+        varInfo.value = std::string(value.GetValue());
+        varInfo.isLocked = true;
     } else {
         std::cerr << "Failed to evaluate expression" << std::endl;
     }
+}
 
-    value = frame.EvaluateExpression("stop = true");
-    if (value.IsValid()) {
-        std::cout << "Expression Result: " << value.GetValue() << std::endl;
-    } else {
-        std::cerr << "Failed to evaluate expression" << std::endl;
+void UpdateVariableValue(VariableInfo& varInfo) {
+    lldb::SBThread thread = process.GetSelectedThread();
+    if (!thread.IsValid()) {
+        std::cerr << "Failed to get thread" << std::endl;
+        lldb::SBDebugger::Destroy(debugger);
+        return;
     }
 
-    //process.Continue();
+    lldb::SBFrame frame = thread.GetSelectedFrame();
+    if (!frame.IsValid()) {
+        std::cerr << "Failed to get frame" << std::endl;
+        lldb::SBDebugger::Destroy(debugger);
+        return;
+    }
+
+    lldb::SBValue value = frame.EvaluateExpression(varInfo.name.c_str());
+    if (value.IsValid()) {
+        std::string expression = varInfo.name + " = " + varInfo.value;
+        value = frame.EvaluateExpression(expression.c_str());
+        if (value.IsValid()) {
+            varInfo.value = std::string(value.GetValue());
+        } else {
+            std::cerr << "Failed to update value of variable " << varInfo.name << std::endl;
+        }
+    } else {
+        std::cerr << "Failed to fetch value of variable " << varInfo.name << std::endl;
+    }
+}
+
+void lldb_stuff(const std::string& path, lldb::pid_t pid) {
+    lldb::SBDebugger::Initialize();
+    debugger = lldb::SBDebugger::Create();
+    target = debugger.CreateTargetWithFileAndArch(path.c_str(), nullptr);
+    process = target.AttachToProcessWithID(listener, pid, error);
+
+    // Check if the process is successfully attached
+    if (!process.IsValid() || error.Fail()) {
+        std::cerr << "Failed to attach to process: " << error.GetCString() << std::endl;
+        // Handle error
+    }
 }
 
 int main(int argc, char** argv) {    
     std::string executable_path = argv[1];
     auto pid = std::atoi(argv[2]);
     lldb_stuff(executable_path, pid);
-    
+
     // Initialize GLFW
     if (!glfwInit())
         return 1;
@@ -113,9 +146,33 @@ int main(int argc, char** argv) {
         ImGui::NewFrame();
 
         // Create a window with some text fields
-        ImGui::Begin("Example Window");
-        static char text[128] = "";
-        ImGui::InputText("Text field", text, IM_ARRAYSIZE(text));
+        ImGui::Begin("Variables");
+
+        // Button to add a new variable
+        if (ImGui::Button("Add Variable")) {
+            variables.push_back(VariableInfo());
+        }
+
+        // Iterate over each variable
+        for (auto& var_info : variables) {
+            if (!var_info.isLocked) {
+                // Allow the user to enter a variable name
+                ImGui::InputText("##varname", &var_info.name);
+                if (ImGui::IsItemDeactivatedAfterEdit()) {
+                    // When the user presses enter, fetch the variable's value
+                    FetchVariableValue(var_info);
+                }
+            } else {
+                // Display the locked variable name and its value
+                ImGui::Text("%s: ", var_info.name.c_str());
+                ImGui::SameLine();
+                ImGui::InputText("##varvalue", &var_info.value);
+                if (ImGui::IsItemDeactivatedAfterEdit()) {
+                    UpdateVariableValue(var_info);
+                }
+            }
+        }
+
         ImGui::End();
 
         // Rendering
