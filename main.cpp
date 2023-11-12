@@ -24,58 +24,137 @@ lldb::SBListener listener;
 lldb::SBError error;
 lldb::SBProcess process;
 
-void FetchVariableValue(VariableInfo& varInfo) {
-    lldb::SBThread thread = process.GetSelectedThread();
-    if (!thread.IsValid()) {
-        std::cerr << "Failed to get thread" << std::endl;
-        lldb::SBDebugger::Destroy(debugger);
-        return;
-    }
+GLFWwindow* window = nullptr;
 
-    lldb::SBFrame frame = thread.GetSelectedFrame();
-    if (!frame.IsValid()) {
-        std::cerr << "Failed to get frame" << std::endl;
-        lldb::SBDebugger::Destroy(debugger);
-        return;
-    }
+void ContinueProcess(lldb::SBProcess& process) {
+    if (process.GetState() == lldb::eStateStopped) {
+        process.Continue();
 
-    lldb::SBValue value = frame.EvaluateExpression(varInfo.name.c_str());
-    if (value.IsValid()) {
-        std::cout << "Expression Result: " << value.GetValue() << std::endl;
-        varInfo.value = std::string(value.GetValue());
-        varInfo.isLocked = true;
+        if (process.GetState() != lldb::eStateRunning) {
+            std::cerr << "Failed to continue the process." << std::endl;
+        }
     } else {
-        std::cerr << "Failed to evaluate expression" << std::endl;
+        std::cerr << "Process is not in a stopped state." << std::endl;
     }
 }
 
-void UpdateVariableValue(VariableInfo& varInfo) {
+void FetchAllVariables() {
+    variables.clear();
+
+    lldb::SBThread thread = process.GetSelectedThread();
+    if (!thread.IsValid()) {
+        std::cerr << "No valid thread selected." << std::endl;
+        return;
+    }
+
+    auto num_frames = thread.GetNumFrames();
+    for (auto i = 0; i < num_frames; ++i) {
+        lldb::SBFrame frame = thread.GetFrameAtIndex(i);
+        if (!frame.IsValid()) {
+            std::cerr << "No valid frame selected." << std::endl;
+            return;
+        }
+
+        lldb::SBValueList frameVariables = frame.GetVariables(true, true, true, true);
+
+        for (int i = 0; i < frameVariables.GetSize(); i++) {
+            lldb::SBValue var = frameVariables.GetValueAtIndex(i);
+            if (var.IsValid()) {
+                bool cont = false;
+                for (auto& v : variables) {
+                    if (var.GetName() == v.name) {
+                        cont = true;
+                    }
+                }
+                if (cont) {
+                    continue;
+                }
+
+                if (var.GetValue() == nullptr) {
+                    continue;
+                }
+                VariableInfo varInfo;
+                varInfo.name = var.GetName();
+                varInfo.value = var.GetValue();
+                varInfo.isLocked = true;
+                variables.push_back(varInfo);
+            }
+        }
+    }
+}
+
+void FetchVariableValue(VariableInfo& var_info) {
+    process.Stop();
+
     lldb::SBThread thread = process.GetSelectedThread();
     if (!thread.IsValid()) {
         std::cerr << "Failed to get thread" << std::endl;
-        lldb::SBDebugger::Destroy(debugger);
         return;
     }
 
     lldb::SBFrame frame = thread.GetSelectedFrame();
     if (!frame.IsValid()) {
         std::cerr << "Failed to get frame" << std::endl;
-        lldb::SBDebugger::Destroy(debugger);
         return;
     }
 
-    lldb::SBValue value = frame.EvaluateExpression(varInfo.name.c_str());
+    std::cout << var_info.name << " " << var_info.value << std::endl;
+    lldb::SBValue value = frame.EvaluateExpression(var_info.name.c_str());
     if (value.IsValid()) {
-        std::string expression = varInfo.name + " = " + varInfo.value;
-        value = frame.EvaluateExpression(expression.c_str());
-        if (value.IsValid()) {
-            varInfo.value = std::string(value.GetValue());
-        } else {
-            std::cerr << "Failed to update value of variable " << varInfo.name << std::endl;
-        }
+        std::cout << "Expression Result: " << value.GetValue() << std::endl;
+        var_info.value = std::string(value.GetValue());
+        var_info.isLocked = true;
     } else {
-        std::cerr << "Failed to fetch value of variable " << varInfo.name << std::endl;
+        std::cerr << "Failed to evaluate expression" << std::endl;
     }
+
+    ContinueProcess(process);
+}
+
+void UpdateVariableValue(VariableInfo& var_info) {
+    process.Stop();
+    
+    lldb::SBThread thread = process.GetSelectedThread();
+    if (!thread.IsValid()) {
+        std::cerr << "Failed to get thread" << std::endl;
+        return;
+    }
+
+    bool hard_break = false;
+    auto num_frames = thread.GetNumFrames();
+    for (auto i = 0; i < num_frames; ++i) {
+        lldb::SBFrame frame = thread.GetFrameAtIndex(i);
+        if (!frame.IsValid()) {
+            std::cerr << "No valid frame selected." << std::endl;
+            return;
+        }
+
+        lldb::SBValueList frameVariables = frame.GetVariables(true, true, true, true);
+
+        for (int i = 0; i < frameVariables.GetSize(); i++) {
+            lldb::SBValue var = frameVariables.GetValueAtIndex(i);
+            if (var.IsValid()) {
+                if (std::string(var.GetName()) != var_info.name) {
+                    continue;
+                }
+                
+                std::string expression = var_info.name + " = " + var_info.value;
+                lldb::SBValue value = frame.EvaluateExpression(expression.c_str());
+                if (value.IsValid()) {
+                    var_info.value = std::string(value.GetValue());
+                    hard_break = true;
+                    break;
+                } else {
+                    std::cerr << "Failed to update value of variable " << var_info.name << std::endl;
+                }
+            }
+        }
+        if (hard_break) {
+            break;
+        }
+    }
+
+    ContinueProcess(process);
 }
 
 void lldb_stuff(const std::string& path, lldb::pid_t pid) {
@@ -84,10 +163,9 @@ void lldb_stuff(const std::string& path, lldb::pid_t pid) {
     target = debugger.CreateTargetWithFileAndArch(path.c_str(), nullptr);
     process = target.AttachToProcessWithID(listener, pid, error);
 
-    // Check if the process is successfully attached
     if (!process.IsValid() || error.Fail()) {
         std::cerr << "Failed to attach to process: " << error.GetCString() << std::endl;
-        // Handle error
+        std::exit(-1);
     }
 }
 
@@ -118,7 +196,7 @@ int main(int argc, char** argv) {
 #endif
 
     // Create a windowed mode window and its OpenGL context
-    GLFWwindow* window = glfwCreateWindow(640, 480, "Dear ImGui GLFW+OpenGL3 example", NULL, NULL);
+    window = glfwCreateWindow(640, 480, "HOOK", NULL, NULL);
     if (window == NULL)
         return 1;
 
@@ -135,6 +213,8 @@ int main(int argc, char** argv) {
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
 
+    FetchAllVariables();
+
     // Main loop
     while (!glfwWindowShouldClose(window))
     {
@@ -148,25 +228,22 @@ int main(int argc, char** argv) {
         // Create a window with some text fields
         ImGui::Begin("Variables");
 
-        // Button to add a new variable
-        if (ImGui::Button("Add Variable")) {
-            variables.push_back(VariableInfo());
-        }
-
-        // Iterate over each variable
         for (auto& var_info : variables) {
             if (!var_info.isLocked) {
                 // Allow the user to enter a variable name
-                ImGui::InputText("##varname", &var_info.name);
+                std::string label = "##varname" + var_info.name;
+                ImGui::InputText(label.c_str(), &var_info.name);
                 if (ImGui::IsItemDeactivatedAfterEdit()) {
-                    // When the user presses enter, fetch the variable's value
+                    std::cout << var_info.name << " " << var_info.value << std::endl;
                     FetchVariableValue(var_info);
+                    std::cout << var_info.name << " " << var_info.value << std::endl;
                 }
             } else {
                 // Display the locked variable name and its value
-                ImGui::Text("%s: ", var_info.name.c_str());
+                ImGui::Text("%s =", var_info.name.c_str());
                 ImGui::SameLine();
-                ImGui::InputText("##varvalue", &var_info.value);
+                std::string label = "##varname" + var_info.name;
+                ImGui::InputText(label.c_str(), &var_info.value);
                 if (ImGui::IsItemDeactivatedAfterEdit()) {
                     UpdateVariableValue(var_info);
                 }
