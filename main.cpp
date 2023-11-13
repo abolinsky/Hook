@@ -17,6 +17,7 @@ struct VariableInfo {
 };
 
 std::vector<VariableInfo> variables;
+VariableInfo current_var_info;
 
 lldb::SBDebugger debugger;
 lldb::SBTarget target;
@@ -72,8 +73,6 @@ void FetchAllVariables() {
 }
 
 void UpdateVariableValue(VariableInfo& var_info) {
-    process.Stop();
-    
     lldb::SBThread thread = process.GetSelectedThread();
     if (!thread.IsValid()) {
         std::cerr << "Failed to get thread" << std::endl;
@@ -113,19 +112,45 @@ void UpdateVariableValue(VariableInfo& var_info) {
             break;
         }
     }
-
-    process.Continue();
 }
 
 void lldb_stuff(const std::string& path, lldb::pid_t pid) {
     lldb::SBDebugger::Initialize();
     debugger = lldb::SBDebugger::Create();
-    target = debugger.CreateTargetWithFileAndArch(path.c_str(), nullptr);
+    target = debugger.CreateTarget(path.c_str());
     process = target.AttachToProcessWithID(listener, pid, error);
 
     if (!process.IsValid() || error.Fail()) {
         std::cerr << "Failed to attach to process: " << error.GetCString() << std::endl;
         std::exit(-1);
+    }
+
+    // Set up lldb event listener
+    listener = debugger.GetListener();
+    process.GetBroadcaster().AddListener(listener, lldb::SBProcess::eBroadcastBitStateChanged);
+}
+
+void HandleProcessEvents() {
+    lldb::SBEvent event;
+    while (listener.PeekAtNextEvent(event)) {
+        if (lldb::SBProcess::EventIsProcessEvent(event)) {
+            lldb::StateType state = lldb::SBProcess::GetStateFromEvent(event);
+
+            switch (state) {
+                case lldb::eStateStopped:
+                    UpdateVariableValue(current_var_info);
+                    FetchAllVariables();
+                    process.Continue();
+                    break;
+                case lldb::eStateRunning:
+                    break;
+                case lldb::eStateExited:
+                    break;
+                default:
+                    break;
+            }
+        }
+        listener.GetNextEvent(event);
     }
 }
 
@@ -174,11 +199,15 @@ int main(int argc, char** argv) {
     ImGui_ImplOpenGL3_Init(glsl_version);
 
     FetchAllVariables();
+    process.Continue();
 
     // Main loop
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
+
+        // Handle LLDB process events
+        HandleProcessEvents();
 
         // Start the Dear ImGui frame
         ImGui_ImplOpenGL3_NewFrame();
@@ -195,7 +224,8 @@ int main(int argc, char** argv) {
                 std::string label = "##varname" + var_info.name;
                 ImGui::InputText(label.c_str(), &var_info.value);
                 if (ImGui::IsItemDeactivatedAfterEdit()) {
-                    UpdateVariableValue(var_info);
+                    current_var_info = var_info;
+                    process.Stop();
                 }
             }
         }
