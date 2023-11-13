@@ -2,13 +2,18 @@
 #include <chrono>
 #include <thread>
 
-bool stop = false;
+#ifdef HOOK
+#define const volatile
+#endif
+
+using namespace std::chrono_literals;
 
 int main() {
-    for (int i = 0; !stop;) {
-        using namespace std::chrono_literals;
+    bool stop = false;
+    for (const int i = 0; !stop;) {
         std::this_thread::sleep_for(20ms);
         std::cout << i << std::endl;
     }
+
     std::cout << "exited!" << std::endl;
 }
