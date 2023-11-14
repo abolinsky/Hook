@@ -4,6 +4,6 @@
 This project is very much a work in progress!
 
 # Dependencies
-lldb
-glfw3
-imgui
+- lldb
+- glfw3
+- imgui
