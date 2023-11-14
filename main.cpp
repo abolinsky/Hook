@@ -144,10 +144,13 @@ void UpdateVariableValue(VariableInfo& var_info) {
         lldb::SBValue var;
         for (int j = 0; j < vars.GetSize(); ++j) {
             auto v = vars.GetValueAtIndex(j);
-            if (v.GetName() == names[0].c_str()) {
+            if (std::string(v.GetName()) == names[0]) {
                 var = v;
                 break;
             }
+        }
+        if (!var.IsValid()) {
+            continue;
         }
         
         std::string expression = var_info.name + " = " + var_info.value;
