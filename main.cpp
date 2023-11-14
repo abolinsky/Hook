@@ -216,7 +216,7 @@ int main(int argc, char** argv) {
 #endif
 
     // Create a windowed mode window and its OpenGL context
-    window = glfwCreateWindow(640, 480, "HOOK", NULL, NULL);
+    window = glfwCreateWindow(640, 480, "hook", NULL, NULL);
     if (window == NULL)
         return 1;
 

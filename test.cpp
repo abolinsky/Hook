@@ -17,6 +17,7 @@ std::ostream& operator<<(std::ostream& s, const Foo& foo) {
 class Bar {
 public:
     int c = 0;
+
 private:
     Foo foo;
     friend std::ostream& operator<<(std::ostream& os, const Bar& obj);
