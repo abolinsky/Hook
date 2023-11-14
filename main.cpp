@@ -4,10 +4,10 @@
 #include "imgui_impl_opengl3.h"
 
 #include <iostream>
-#include <set>
 #include <vector>
 #include <string>
 #include <sstream>
+#include <limits>
 
 #include <GLFW/glfw3.h>
 #include <lldb/API/LLDB.h>
@@ -16,20 +16,14 @@ struct VariableInfo {
     std::string function_name;
     std::string name;
     std::string value;
+    uint64_t id = std::numeric_limits<uint64_t>::max();
     bool isLocked = false;
-    bool isStruct = false;
+    bool isNested = false;
     std::vector<VariableInfo> children;
+    VariableInfo* parent = nullptr;
 };
 
-struct VariableInfoComparator {
-    bool operator()(const VariableInfo& a, const VariableInfo& b) const {
-        if (a.function_name < b.function_name) return true;
-        if (a.function_name > b.function_name) return false;
-        return a.name < b.name;
-    }
-};
-
-std::set<VariableInfo, VariableInfoComparator> variables;
+std::vector<VariableInfo> variables;
 
 VariableInfo current_var_info;
 bool published_changes = true;
@@ -42,38 +36,84 @@ lldb::SBProcess process;
 
 GLFWwindow* window = nullptr;
 
-void FetchVariableMembers(lldb::SBValue& value, std::vector<VariableInfo>& variables, const std::string& parentName = "") {
-    if (!value.IsValid()) {
-        return;
-    }
+void FetchStructMembers(lldb::SBValue& structValue, VariableInfo& parent) {
+    for (int i = 0; i < structValue.GetNumChildren(); ++i) {
+        lldb::SBValue childValue = structValue.GetChildAtIndex(i);
+        if (childValue.IsValid()) {
+            lldb::TypeClass typeClass = childValue.GetType().GetTypeClass();
+            bool isStruct = typeClass == lldb::eTypeClassStruct;
+            bool isClass = typeClass == lldb::eTypeClassClass;
+            bool childIsNested = isStruct || isClass;
 
-    lldb::SBType valueType = value.GetType();
-    lldb::TypeClass typeClass = valueType.GetTypeClass();
+            VariableInfo childVarInfo {
+                .function_name = parent.function_name,
+                .name = childValue.GetName(),
+                .value = childValue.GetValue() ? childValue.GetValue() : "",
+                .id = childValue.GetID(),
+                .isLocked = true,
+                .isNested = childIsNested,
+                .parent = &parent
+            };
 
-    if (typeClass == lldb::eTypeClassStruct || typeClass == lldb::eTypeClassClass) {
-        const int numChildren = value.GetNumChildren();
-        for (int i = 0; i < numChildren; ++i) {
-            lldb::SBValue child = value.GetChildAtIndex(i);
-            if (child.IsValid()) {
-                std::string childName = parentName.empty() ? value.GetName() : parentName + "." + value.GetName();
-                FetchVariableMembers(child, variables, childName);
+            parent.children.push_back(childVarInfo);
+
+            if (childIsNested) {
+                FetchStructMembers(childValue, parent.children.back());
             }
-        }
-    } else {
-        if (!value.GetValue()) {
-            return;
-        }
 
-        VariableInfo varInfo;
-        varInfo.name = parentName.empty() ? value.GetName() : parentName + "." + value.GetName();
-        varInfo.value = value.GetValue();
-        varInfo.isLocked = true;
-        variables.push_back(varInfo);
+        }
+    }
+}
+
+void FetchVariablesFromFrame(lldb::SBFrame& frame, std::vector<VariableInfo>& variables) {
+    lldb::SBValueList frameVariables = frame.GetVariables(true, true, true, true); // arguments, locals, statics, in_scope_only
+
+    for (int i = 0; i < frameVariables.GetSize(); i++) {
+        lldb::SBValue var = frameVariables.GetValueAtIndex(i);
+        if (var.IsValid()) {
+            lldb::TypeClass typeClass = var.GetType().GetTypeClass();
+            bool isStruct = typeClass == lldb::eTypeClassStruct;
+            bool isClass = typeClass == lldb::eTypeClassClass;
+            bool isNested = isStruct || isClass;
+            
+            VariableInfo varInfo {
+                .function_name = frame.GetFunction().GetName(),
+                .name = var.GetName(),
+                .value = var.GetValue() ? var.GetValue() : "",
+                .id = var.GetID(),
+                .isLocked = true,
+                .isNested = isNested
+            };
+
+            if (varInfo.name.substr(0,2) == "::") {
+                varInfo.function_name = "";
+            } else {
+                varInfo.function_name = frame.GetFunctionName();
+            }
+
+            bool already_exists = false;
+            for (const auto& var : variables) {
+                if (var.function_name == varInfo.function_name && var.name == varInfo.name) {
+                    already_exists = true;
+                    break;
+                }
+            }
+
+            if (!already_exists) {
+                variables.push_back(varInfo);
+            }
+
+            if (isNested) {
+                FetchStructMembers(var, variables.back());
+            }
+
+        }
     }
 }
 
 void FetchAllVariables() {
     variables.clear();
+    variables.reserve(500); // FIXME
 
     lldb::SBThread thread = process.GetSelectedThread();
     if (!thread.IsValid()) {
@@ -89,38 +129,8 @@ void FetchAllVariables() {
             return;
         }
 
-        lldb::SBValueList frameVariables = frame.GetVariables(true, true, true, true);
-
-        std::vector<VariableInfo> variables;
-        for (int i = 0; i < frameVariables.GetSize(); i++) {
-            lldb::SBValue var = frameVariables.GetValueAtIndex(i);
-            FetchVariableMembers(var, variables);
-        }
-        for (auto& vi : variables) {
-            if (vi.name.substr(0,2) == "::") {
-                vi.function_name = "";
-            } else {
-                vi.function_name = frame.GetFunctionName();
-            }
-            ::variables.insert(vi);
-        }
+        FetchVariablesFromFrame(frame, variables);
     }
-}
-
-std::vector<std::string> split(const std::string &s, char delimiter) {
-    std::vector<std::string> tokens;
-    std::string token;
-    std::istringstream tokenStream(s);
-
-    while (std::getline(tokenStream, token, delimiter)) {
-        tokens.push_back(token);
-    }
-
-    if (tokens.empty()) {
-        tokens.push_back(s);
-    }
-
-    return tokens;
 }
 
 void UpdateVariableValue(VariableInfo& var_info) {
@@ -139,12 +149,22 @@ void UpdateVariableValue(VariableInfo& var_info) {
             continue;
         }
 
-        auto names = split(var_info.name, '.');
+        std::string full_qualified_name = var_info.name;
+        const VariableInfo* root = &var_info;
+        while (true) {
+            if (root->parent) {
+                root = root->parent;
+                full_qualified_name = root->name + "." + full_qualified_name;
+            } else {
+                break;
+            }
+        }
+
         lldb::SBValueList vars = frame.GetVariables(true, true, true, true);
         lldb::SBValue var;
         for (int j = 0; j < vars.GetSize(); ++j) {
             auto v = vars.GetValueAtIndex(j);
-            if (std::string(v.GetName()) == names[0]) {
+            if (v.GetID() == root->id) {
                 var = v;
                 break;
             }
@@ -153,13 +173,11 @@ void UpdateVariableValue(VariableInfo& var_info) {
             continue;
         }
         
-        std::string expression = var_info.name + " = " + var_info.value;
+        std::string expression = full_qualified_name + " = " + var_info.value;
         lldb::SBValue value = frame.EvaluateExpression(expression.c_str());
-        if (value.IsValid() && value.GetValue()) {
-            var_info.value = std::string(value.GetValue());
-            break;
-        } else {
+        if (!value.IsValid() || !value.GetValue()) {
             std::cerr << "Failed to update value of variable " << var_info.name << std::endl;
+            return;
         }
     }
 }
@@ -208,25 +226,37 @@ void HandleProcessEvents() {
 }
 
 void DisplayVariable(const VariableInfo& varInfo) {
-    if (varInfo.isStruct) {
-        if (ImGui::TreeNode(varInfo.name.c_str())) {
+    if (varInfo.isNested) {
+        if (varInfo.parent) {
+            ImGui::Text("%s =", varInfo.name.c_str());
+        } else {
+            if (varInfo.function_name.empty()) {
+                ImGui::Text("%s =", varInfo.name.c_str());
+            } else {
+                ImGui::Text("(%s) %s =", varInfo.function_name.c_str(), varInfo.name.c_str());
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::TreeNode((std::string("##varname") + std::to_string(varInfo.id)).c_str())) {
             for (const auto& childVar : varInfo.children) {
                 DisplayVariable(childVar);
             }
             ImGui::TreePop();
         }
     } else {
-        if (varInfo.function_name.empty()) {
-            ImGui::Text("%s =", varInfo.name.c_str());
+        if (!varInfo.parent) {
+            if (varInfo.function_name.empty()) {
+                ImGui::Text("%s =", varInfo.name.c_str());
+            } else {
+                ImGui::Text("(%s) %s =", varInfo.function_name.c_str(), varInfo.name.c_str());
+            }
         } else {
-            ImGui::Text("(%s) %s =", varInfo.function_name.c_str(), varInfo.name.c_str());
+            ImGui::Text("%s =", varInfo.name.c_str());
         }
         
         ImGui::SameLine();
         std::string label = "##varname" + varInfo.function_name + varInfo.name;
 
-        // FIXME. This will work, but only as long as the value is never used in the
-        // comparison for determining order by the set. Refactor to avoid this const_cast.
         ImGui::InputText(label.c_str(), const_cast<std::string*>(&varInfo.value));
 
         if (ImGui::IsItemDeactivatedAfterEdit()) {
@@ -299,8 +329,8 @@ int main(int argc, char** argv) {
 
         // Create a window with some text fields
         ImGui::Begin("Variables");
-        for (const auto& varInfo : variables) {
-            DisplayVariable(varInfo);
+        for (const auto& var : variables) {
+            DisplayVariable(var);
         }
 
         ImGui::End();
@@ -311,7 +341,7 @@ int main(int argc, char** argv) {
 
         glfwSwapBuffers(window);
 
-        process.Stop();
+        process.Stop(); // FIXME: This should not be called this often. Too slow
     }
 
     // Cleanup
