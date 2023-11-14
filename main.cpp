@@ -4,7 +4,8 @@
 #include "imgui_impl_opengl3.h"
 
 #include <iostream>
-#include <unordered_map>
+#include <set>
+#include <vector>
 #include <string>
 #include <sstream>
 
@@ -12,6 +13,7 @@
 #include <lldb/API/LLDB.h>
 
 struct VariableInfo {
+    std::string function_name;
     std::string name;
     std::string value;
     bool isLocked = false;
@@ -19,8 +21,18 @@ struct VariableInfo {
     std::vector<VariableInfo> children;
 };
 
-std::vector<VariableInfo> variables;
+struct VariableInfoComparator {
+    bool operator()(const VariableInfo& a, const VariableInfo& b) const {
+        if (a.function_name < b.function_name) return true;
+        if (a.function_name > b.function_name) return false;
+        return a.name < b.name;
+    }
+};
+
+std::set<VariableInfo, VariableInfoComparator> variables;
+
 VariableInfo current_var_info;
+bool published_changes = true;
 
 lldb::SBDebugger debugger;
 lldb::SBTarget target;
@@ -79,9 +91,18 @@ void FetchAllVariables() {
 
         lldb::SBValueList frameVariables = frame.GetVariables(true, true, true, true);
 
+        std::vector<VariableInfo> variables;
         for (int i = 0; i < frameVariables.GetSize(); i++) {
             lldb::SBValue var = frameVariables.GetValueAtIndex(i);
             FetchVariableMembers(var, variables);
+        }
+        for (auto& vi : variables) {
+            if (vi.name.substr(0,2) == "::") {
+                vi.function_name = "";
+            } else {
+                vi.function_name = frame.GetFunctionName();
+            }
+            ::variables.insert(vi);
         }
     }
 }
@@ -93,6 +114,10 @@ std::vector<std::string> split(const std::string &s, char delimiter) {
 
     while (std::getline(tokenStream, token, delimiter)) {
         tokens.push_back(token);
+    }
+
+    if (tokens.empty()) {
+        tokens.push_back(s);
     }
 
     return tokens;
@@ -111,20 +136,27 @@ void UpdateVariableValue(VariableInfo& var_info) {
         lldb::SBFrame frame = thread.GetFrameAtIndex(i);
         if (!frame.IsValid()) {
             std::cerr << "No valid frame selected." << std::endl;
-            return;
+            continue;
         }
 
         auto names = split(var_info.name, '.');
-        lldb::SBValue var = frame.FindVariable(names[0].c_str());
-        if (var.IsValid()) {
-            std::string expression = var_info.name + " = " + var_info.value;
-            lldb::SBValue value = frame.EvaluateExpression(expression.c_str());
-            if (value.IsValid() && value.GetValue()) {
-                var_info.value = std::string(value.GetValue());
+        lldb::SBValueList vars = frame.GetVariables(true, true, true, true);
+        lldb::SBValue var;
+        for (int j = 0; j < vars.GetSize(); ++j) {
+            auto v = vars.GetValueAtIndex(j);
+            if (v.GetName() == names[0].c_str()) {
+                var = v;
                 break;
-            } else {
-                std::cerr << "Failed to update value of variable " << var_info.name << std::endl;
             }
+        }
+        
+        std::string expression = var_info.name + " = " + var_info.value;
+        lldb::SBValue value = frame.EvaluateExpression(expression.c_str());
+        if (value.IsValid() && value.GetValue()) {
+            var_info.value = std::string(value.GetValue());
+            break;
+        } else {
+            std::cerr << "Failed to update value of variable " << var_info.name << std::endl;
         }
     }
 }
@@ -153,7 +185,10 @@ void HandleProcessEvents() {
 
             switch (state) {
                 case lldb::eStateStopped:
-                    UpdateVariableValue(current_var_info);
+                    if (!published_changes) {
+                        UpdateVariableValue(current_var_info);
+                        published_changes = true;
+                    }
                     FetchAllVariables();
                     process.Continue();
                     break;
@@ -169,21 +204,31 @@ void HandleProcessEvents() {
     }
 }
 
-void DisplayVariable(VariableInfo& varInfo) {
+void DisplayVariable(const VariableInfo& varInfo) {
     if (varInfo.isStruct) {
         if (ImGui::TreeNode(varInfo.name.c_str())) {
-            for (auto& childVar : varInfo.children) {
+            for (const auto& childVar : varInfo.children) {
                 DisplayVariable(childVar);
             }
             ImGui::TreePop();
         }
     } else {
-        ImGui::Text("%s =", varInfo.name.c_str());
+        if (varInfo.function_name.empty()) {
+            ImGui::Text("%s =", varInfo.name.c_str());
+        } else {
+            ImGui::Text("(%s) %s =", varInfo.function_name.c_str(), varInfo.name.c_str());
+        }
+        
         ImGui::SameLine();
-        std::string label = "##varname" + varInfo.name;
-        ImGui::InputText(label.c_str(), &varInfo.value);
+        std::string label = "##varname" + varInfo.function_name + varInfo.name;
+
+        // FIXME. This will work, but only as long as the value is never used in the
+        // comparison for determining order by the set. Refactor to avoid this const_cast.
+        ImGui::InputText(label.c_str(), const_cast<std::string*>(&varInfo.value));
+
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             current_var_info = varInfo;
+            published_changes = false;
             process.Stop();
         }
     }
@@ -251,8 +296,7 @@ int main(int argc, char** argv) {
 
         // Create a window with some text fields
         ImGui::Begin("Variables");
-
-        for (auto& varInfo : variables) {
+        for (const auto& varInfo : variables) {
             DisplayVariable(varInfo);
         }
 
@@ -263,6 +307,8 @@ int main(int argc, char** argv) {
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(window);
+
+        process.Stop();
     }
 
     // Cleanup
