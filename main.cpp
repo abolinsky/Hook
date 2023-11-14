@@ -182,22 +182,6 @@ void UpdateVariableValue(VariableInfo& var_info) {
     }
 }
 
-void lldb_stuff(const std::string& path, lldb::pid_t pid) {
-    lldb::SBDebugger::Initialize();
-    debugger = lldb::SBDebugger::Create();
-    target = debugger.CreateTarget(path.c_str());
-    process = target.AttachToProcessWithID(listener, pid, error);
-
-    if (!process.IsValid() || error.Fail()) {
-        std::cerr << "Failed to attach to process: " << error.GetCString() << std::endl;
-        std::exit(-1);
-    }
-
-    // Set up lldb event listener
-    listener = debugger.GetListener();
-    process.GetBroadcaster().AddListener(listener, lldb::SBProcess::eBroadcastBitStateChanged);
-}
-
 void HandleProcessEvents() {
     lldb::SBEvent event;
     while (listener.PeekAtNextEvent(event)) {
@@ -267,10 +251,50 @@ void DisplayVariable(const VariableInfo& varInfo) {
     }
 }
 
-int main(int argc, char** argv) {    
-    std::string executable_path = argv[1];
-    auto pid = std::atoi(argv[2]);
-    lldb_stuff(executable_path, pid);
+void SetupEventListener() {
+    listener = debugger.GetListener();
+    process.GetBroadcaster().AddListener(listener, lldb::SBProcess::eBroadcastBitStateChanged);
+}
+
+bool AttachToProcess(lldb::SBAttachInfo& attachInfo) {
+    target = debugger.CreateTarget("");
+    process = target.Attach(attachInfo, error);
+    if (!process.IsValid() || error.Fail()) {
+        std::cerr << "Failed to attach to process: " << error.GetCString() << std::endl;
+        return false;
+    }
+    return true;
+}
+
+bool AttachToProcessWithID(lldb::pid_t pid) {
+    lldb::SBAttachInfo attachInfo;
+    attachInfo.SetProcessID(pid);
+    return AttachToProcess(attachInfo);
+}
+
+bool SetupDebugger(const std::string& process_string) {
+    lldb::SBDebugger::Initialize();
+    debugger = lldb::SBDebugger::Create();
+
+    bool attachSuccess = false;
+    try {
+        lldb::pid_t pid = std::stol(process_string);
+        attachSuccess = AttachToProcessWithID(pid);
+    } catch (...) {}
+
+    return attachSuccess;
+}
+
+int main(int argc, char** argv) {
+    if (argc != 2) {
+        std::cerr << "Usage: " << argv[0] << " <pid>" << std::endl;
+        return -1;
+    }
+
+    auto success = SetupDebugger(argv[1]);
+    if (!success) return -1;
+
+    SetupEventListener();
 
     // Initialize GLFW
     if (!glfwInit())
