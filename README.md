@@ -1,5 +1,5 @@
 # Hook
-[hook.webm](https://github.com/abolinsky/hook/assets/5623716/483bada3-cb47-4668-bfc2-1fc97892dc8f)
+<img width="1681" alt="hook" src="https://github.com/abolinsky/hook/assets/5623716/93722c7d-dcac-44c5-b490-ea9b19dc680b">
 
 # Work in progress
 This project is very much a work in progress!
