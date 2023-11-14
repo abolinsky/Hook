@@ -12,6 +12,7 @@
 #include <GLFW/glfw3.h>
 #include <lldb/API/LLDB.h>
 
+
 struct VariableInfo {
     std::string function_name;
     std::string name;
@@ -24,9 +25,10 @@ struct VariableInfo {
 };
 
 std::vector<VariableInfo> variables;
-
 VariableInfo current_var_info;
 bool published_changes = true;
+
+constexpr unsigned long long delay = 500;
 
 lldb::SBDebugger debugger;
 lldb::SBTarget target;
@@ -35,6 +37,98 @@ lldb::SBError error;
 lldb::SBProcess process;
 
 GLFWwindow* window = nullptr;
+
+
+void UpdateVariableValue(VariableInfo& var_info) {
+    lldb::SBThread thread = process.GetSelectedThread();
+    if (!thread.IsValid()) {
+        std::cerr << "Failed to get thread" << std::endl;
+        return;
+    }
+
+    bool hard_break = false;
+    auto num_frames = thread.GetNumFrames();
+    for (auto i = 0; i < num_frames; ++i) {
+        lldb::SBFrame frame = thread.GetFrameAtIndex(i);
+        if (!frame.IsValid()) {
+            std::cerr << "No valid frame selected." << std::endl;
+            continue;
+        }
+
+        std::string full_qualified_name = var_info.name;
+        const VariableInfo* root = &var_info;
+        while (true) {
+            if (root->parent) {
+                root = root->parent;
+                full_qualified_name = root->name + "." + full_qualified_name;
+            } else {
+                break;
+            }
+        }
+
+        lldb::SBValueList vars = frame.GetVariables(true, true, true, true);
+        lldb::SBValue var;
+        for (int j = 0; j < vars.GetSize(); ++j) {
+            auto v = vars.GetValueAtIndex(j);
+            if (v.GetID() == root->id) {
+                var = v;
+                break;
+            }
+        }
+        if (!var.IsValid()) {
+            continue;
+        }
+        
+        std::string expression = full_qualified_name + " = " + var_info.value;
+        lldb::SBValue value = frame.EvaluateExpression(expression.c_str());
+        if (!value.IsValid() || !value.GetValue()) {
+            std::cerr << "Failed to update value of variable " << var_info.name << std::endl;
+            return;
+        }
+    }
+}
+
+void DisplayVariable(const VariableInfo& varInfo) {
+    if (varInfo.isNested) {
+        if (varInfo.parent) {
+            ImGui::Text("%s =", varInfo.name.c_str());
+        } else {
+            if (varInfo.function_name.empty()) {
+                ImGui::Text("%s =", varInfo.name.c_str());
+            } else {
+                ImGui::Text("(%s) %s =", varInfo.function_name.c_str(), varInfo.name.c_str());
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::TreeNode((std::string("##varname") + std::to_string(varInfo.id)).c_str())) {
+            for (const auto& childVar : varInfo.children) {
+                DisplayVariable(childVar);
+            }
+            ImGui::TreePop();
+        }
+    } else {
+        if (!varInfo.parent) {
+            if (varInfo.function_name.empty()) {
+                ImGui::Text("%s =", varInfo.name.c_str());
+            } else {
+                ImGui::Text("(%s) %s =", varInfo.function_name.c_str(), varInfo.name.c_str());
+            }
+        } else {
+            ImGui::Text("%s =", varInfo.name.c_str());
+        }
+        
+        ImGui::SameLine();
+        std::string label = "##varname" + varInfo.function_name + varInfo.name;
+
+        ImGui::InputText(label.c_str(), const_cast<std::string*>(&varInfo.value));
+
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            current_var_info = varInfo;
+            published_changes = false;
+            process.Stop();
+        }
+    }
+}
 
 void FetchStructMembers(lldb::SBValue& structValue, VariableInfo& parent) {
     for (int i = 0; i < structValue.GetNumChildren(); ++i) {
@@ -133,56 +227,7 @@ void FetchAllVariables() {
     }
 }
 
-void UpdateVariableValue(VariableInfo& var_info) {
-    lldb::SBThread thread = process.GetSelectedThread();
-    if (!thread.IsValid()) {
-        std::cerr << "Failed to get thread" << std::endl;
-        return;
-    }
-
-    bool hard_break = false;
-    auto num_frames = thread.GetNumFrames();
-    for (auto i = 0; i < num_frames; ++i) {
-        lldb::SBFrame frame = thread.GetFrameAtIndex(i);
-        if (!frame.IsValid()) {
-            std::cerr << "No valid frame selected." << std::endl;
-            continue;
-        }
-
-        std::string full_qualified_name = var_info.name;
-        const VariableInfo* root = &var_info;
-        while (true) {
-            if (root->parent) {
-                root = root->parent;
-                full_qualified_name = root->name + "." + full_qualified_name;
-            } else {
-                break;
-            }
-        }
-
-        lldb::SBValueList vars = frame.GetVariables(true, true, true, true);
-        lldb::SBValue var;
-        for (int j = 0; j < vars.GetSize(); ++j) {
-            auto v = vars.GetValueAtIndex(j);
-            if (v.GetID() == root->id) {
-                var = v;
-                break;
-            }
-        }
-        if (!var.IsValid()) {
-            continue;
-        }
-        
-        std::string expression = full_qualified_name + " = " + var_info.value;
-        lldb::SBValue value = frame.EvaluateExpression(expression.c_str());
-        if (!value.IsValid() || !value.GetValue()) {
-            std::cerr << "Failed to update value of variable " << var_info.name << std::endl;
-            return;
-        }
-    }
-}
-
-void HandleProcessEvents() {
+void HandleLLDBProcessEvents() {
     lldb::SBEvent event;
     while (listener.PeekAtNextEvent(event)) {
         if (lldb::SBProcess::EventIsProcessEvent(event)) {
@@ -209,142 +254,15 @@ void HandleProcessEvents() {
     }
 }
 
-void DisplayVariable(const VariableInfo& varInfo) {
-    if (varInfo.isNested) {
-        if (varInfo.parent) {
-            ImGui::Text("%s =", varInfo.name.c_str());
-        } else {
-            if (varInfo.function_name.empty()) {
-                ImGui::Text("%s =", varInfo.name.c_str());
-            } else {
-                ImGui::Text("(%s) %s =", varInfo.function_name.c_str(), varInfo.name.c_str());
-            }
-        }
-        ImGui::SameLine();
-        if (ImGui::TreeNode((std::string("##varname") + std::to_string(varInfo.id)).c_str())) {
-            for (const auto& childVar : varInfo.children) {
-                DisplayVariable(childVar);
-            }
-            ImGui::TreePop();
-        }
-    } else {
-        if (!varInfo.parent) {
-            if (varInfo.function_name.empty()) {
-                ImGui::Text("%s =", varInfo.name.c_str());
-            } else {
-                ImGui::Text("(%s) %s =", varInfo.function_name.c_str(), varInfo.name.c_str());
-            }
-        } else {
-            ImGui::Text("%s =", varInfo.name.c_str());
-        }
-        
-        ImGui::SameLine();
-        std::string label = "##varname" + varInfo.function_name + varInfo.name;
-
-        ImGui::InputText(label.c_str(), const_cast<std::string*>(&varInfo.value));
-
-        if (ImGui::IsItemDeactivatedAfterEdit()) {
-            current_var_info = varInfo;
-            published_changes = false;
-            process.Stop();
-        }
-    }
-}
-
-void SetupEventListener() {
-    listener = debugger.GetListener();
-    process.GetBroadcaster().AddListener(listener, lldb::SBProcess::eBroadcastBitStateChanged);
-}
-
-bool AttachToProcess(lldb::SBAttachInfo& attachInfo) {
-    target = debugger.CreateTarget("");
-    process = target.Attach(attachInfo, error);
-    if (!process.IsValid() || error.Fail()) {
-        std::cerr << "Failed to attach to process: " << error.GetCString() << std::endl;
-        return false;
-    }
-    return true;
-}
-
-bool AttachToProcessWithID(lldb::pid_t pid) {
-    lldb::SBAttachInfo attachInfo;
-    attachInfo.SetProcessID(pid);
-    return AttachToProcess(attachInfo);
-}
-
-bool SetupDebugger(const std::string& process_string) {
-    lldb::SBDebugger::Initialize();
-    debugger = lldb::SBDebugger::Create();
-
-    bool attachSuccess = false;
-    try {
-        lldb::pid_t pid = std::stol(process_string);
-        attachSuccess = AttachToProcessWithID(pid);
-    } catch (...) {}
-
-    return attachSuccess;
-}
-
-int main(int argc, char** argv) {
-    if (argc != 2) {
-        std::cerr << "Usage: " << argv[0] << " <pid>" << std::endl;
-        return -1;
-    }
-
-    auto success = SetupDebugger(argv[1]);
-    if (!success) return -1;
-
-    SetupEventListener();
-
-    // Initialize GLFW
-    if (!glfwInit())
-        return 1;
-
-    // Decide GL+GLSL versions
-#if __APPLE__
-    // GL 3.2 + GLSL 150
-    const char* glsl_version = "#version 150";
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // Required on Mac
-#else
-    // GL 3.0 + GLSL 130
-    const char* glsl_version = "#version 130";
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-    // glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
-    // glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // 3.0+ only
-#endif
-
-    // Create a windowed mode window and its OpenGL context
-    window = glfwCreateWindow(640, 480, "hook", NULL, NULL);
-    if (window == NULL)
-        return 1;
-
-    // Make the window's context current
-    glfwMakeContextCurrent(window);
-    glfwSwapInterval(1); // Enable vsync
-
-    // Setup Dear ImGui context
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-
-    // Setup Platform/Renderer backends
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init(glsl_version);
-
+void MainLoop() {
     FetchAllVariables();
     process.Continue();
 
-    // Main loop
-    while (!glfwWindowShouldClose(window))
-    {
+    unsigned long long delay_tick = 0;
+    while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
-        // Handle LLDB process events
-        HandleProcessEvents();
+        HandleLLDBProcessEvents();
 
         // Start the Dear ImGui frame
         ImGui_ImplOpenGL3_NewFrame();
@@ -365,16 +283,108 @@ int main(int argc, char** argv) {
 
         glfwSwapBuffers(window);
 
-        process.Stop(); // FIXME: This should not be called this often. Too slow
+        ++delay_tick % delay == 0 && process.Stop();
     }
+}
 
-    // Cleanup
+void TearDownGraphics() {
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
 
     glfwDestroyWindow(window);
     glfwTerminate();
+}
 
+bool SetupGraphics() {
+    if (!glfwInit()) return false;
+
+    // Decide GL+GLSL versions
+#if __APPLE__
+    // GL 3.2 + GLSL 150
+    const char* glsl_version = "#version 150";
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // Required on Mac
+#else
+    // GL 3.0 + GLSL 130
+    const char* glsl_version = "#version 130";
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+    // glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
+    // glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // 3.0+ only
+#endif
+
+    window = glfwCreateWindow(640, 480, "hook", NULL, NULL);
+    if (window == NULL) return false;
+
+    glfwMakeContextCurrent(window);
+    glfwSwapInterval(1); // Enable vsync
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init(glsl_version);
+
+    return true;
+}
+
+bool SetupEventListener() {
+    listener = debugger.GetListener();
+    auto event_mask = lldb::SBProcess::eBroadcastBitStateChanged;
+    auto event_bits = process.GetBroadcaster().AddListener(listener, event_mask);
+    return event_bits == event_mask;
+}
+
+bool AttachToProcess(lldb::SBAttachInfo& attachInfo) {
+    target = debugger.CreateTarget("");
+    process = target.Attach(attachInfo, error);
+    if (!process.IsValid() || error.Fail()) {
+        std::cerr << "Failed to attach to process: " << error.GetCString() << std::endl;
+        return false;
+    }
+    return true;
+}
+
+bool AttachToProcessWithID(lldb::pid_t pid) {
+    lldb::SBAttachInfo attachInfo;
+    attachInfo.SetProcessID(pid);
+    return AttachToProcess(attachInfo);
+}
+
+void TearDownDebugger() {
     lldb::SBDebugger::Destroy(debugger);
+}
+
+bool SetupDebugger(const std::string& process_string) {
+    lldb::SBDebugger::Initialize();
+    debugger = lldb::SBDebugger::Create();
+
+    try {
+        lldb::pid_t pid = std::stol(process_string);
+        return AttachToProcessWithID(pid);
+    } catch (...) {
+        return false;
+    }
+}
+
+int main(int argc, char** argv) {
+    if (argc != 2) {
+        std::cerr << "Usage: " << argv[0] << " <pid>" << std::endl;
+        return -1;
+    }
+
+    std::string process_string = argv[1];
+
+    if (!SetupDebugger(process_string)) return -1;
+    if (!SetupEventListener()) return -1;
+    if (!SetupGraphics()) return -1;
+
+    MainLoop();
+
+    TearDownGraphics();
+    TearDownDebugger();
 }
