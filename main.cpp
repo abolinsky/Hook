@@ -6,6 +6,7 @@
 #include <iostream>
 #include <unordered_map>
 #include <string>
+#include <sstream>
 
 #include <GLFW/glfw3.h>
 #include <lldb/API/LLDB.h>
@@ -14,6 +15,8 @@ struct VariableInfo {
     std::string name;
     std::string value;
     bool isLocked = false;
+    bool isStruct = false;
+    std::vector<VariableInfo> children;
 };
 
 std::vector<VariableInfo> variables;
@@ -26,6 +29,36 @@ lldb::SBError error;
 lldb::SBProcess process;
 
 GLFWwindow* window = nullptr;
+
+void FetchVariableMembers(lldb::SBValue& value, std::vector<VariableInfo>& variables, const std::string& parentName = "") {
+    if (!value.IsValid()) {
+        return;
+    }
+
+    lldb::SBType valueType = value.GetType();
+    lldb::TypeClass typeClass = valueType.GetTypeClass();
+
+    if (typeClass == lldb::eTypeClassStruct || typeClass == lldb::eTypeClassClass) {
+        const int numChildren = value.GetNumChildren();
+        for (int i = 0; i < numChildren; ++i) {
+            lldb::SBValue child = value.GetChildAtIndex(i);
+            if (child.IsValid()) {
+                std::string childName = parentName.empty() ? value.GetName() : parentName + "." + value.GetName();
+                FetchVariableMembers(child, variables, childName);
+            }
+        }
+    } else {
+        if (!value.GetValue()) {
+            return;
+        }
+
+        VariableInfo varInfo;
+        varInfo.name = parentName.empty() ? value.GetName() : parentName + "." + value.GetName();
+        varInfo.value = value.GetValue();
+        varInfo.isLocked = true;
+        variables.push_back(varInfo);
+    }
+}
 
 void FetchAllVariables() {
     variables.clear();
@@ -48,28 +81,21 @@ void FetchAllVariables() {
 
         for (int i = 0; i < frameVariables.GetSize(); i++) {
             lldb::SBValue var = frameVariables.GetValueAtIndex(i);
-            if (var.IsValid()) {
-                bool cont = false;
-                for (auto& v : variables) {
-                    if (var.GetName() == v.name) {
-                        cont = true;
-                    }
-                }
-                if (cont) {
-                    continue;
-                }
-
-                if (var.GetValue() == nullptr) {
-                    continue;
-                }
-                VariableInfo varInfo;
-                varInfo.name = var.GetName();
-                varInfo.value = var.GetValue();
-                varInfo.isLocked = true;
-                variables.push_back(varInfo);
-            }
+            FetchVariableMembers(var, variables);
         }
     }
+}
+
+std::vector<std::string> split(const std::string &s, char delimiter) {
+    std::vector<std::string> tokens;
+    std::string token;
+    std::istringstream tokenStream(s);
+
+    while (std::getline(tokenStream, token, delimiter)) {
+        tokens.push_back(token);
+    }
+
+    return tokens;
 }
 
 void UpdateVariableValue(VariableInfo& var_info) {
@@ -88,28 +114,17 @@ void UpdateVariableValue(VariableInfo& var_info) {
             return;
         }
 
-        lldb::SBValueList frameVariables = frame.GetVariables(true, true, true, true);
-
-        for (int i = 0; i < frameVariables.GetSize(); i++) {
-            lldb::SBValue var = frameVariables.GetValueAtIndex(i);
-            if (var.IsValid()) {
-                if (std::string(var.GetName()) != var_info.name) {
-                    continue;
-                }
-                
-                std::string expression = var_info.name + " = " + var_info.value;
-                lldb::SBValue value = frame.EvaluateExpression(expression.c_str());
-                if (value.IsValid()) {
-                    var_info.value = std::string(value.GetValue());
-                    hard_break = true;
-                    break;
-                } else {
-                    std::cerr << "Failed to update value of variable " << var_info.name << std::endl;
-                }
+        auto names = split(var_info.name, '.');
+        lldb::SBValue var = frame.FindVariable(names[0].c_str());
+        if (var.IsValid()) {
+            std::string expression = var_info.name + " = " + var_info.value;
+            lldb::SBValue value = frame.EvaluateExpression(expression.c_str());
+            if (value.IsValid() && value.GetValue()) {
+                var_info.value = std::string(value.GetValue());
+                break;
+            } else {
+                std::cerr << "Failed to update value of variable " << var_info.name << std::endl;
             }
-        }
-        if (hard_break) {
-            break;
         }
     }
 }
@@ -151,6 +166,26 @@ void HandleProcessEvents() {
             }
         }
         listener.GetNextEvent(event);
+    }
+}
+
+void DisplayVariable(VariableInfo& varInfo) {
+    if (varInfo.isStruct) {
+        if (ImGui::TreeNode(varInfo.name.c_str())) {
+            for (auto& childVar : varInfo.children) {
+                DisplayVariable(childVar);
+            }
+            ImGui::TreePop();
+        }
+    } else {
+        ImGui::Text("%s =", varInfo.name.c_str());
+        ImGui::SameLine();
+        std::string label = "##varname" + varInfo.name;
+        ImGui::InputText(label.c_str(), &varInfo.value);
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            current_var_info = varInfo;
+            process.Stop();
+        }
     }
 }
 
@@ -217,17 +252,8 @@ int main(int argc, char** argv) {
         // Create a window with some text fields
         ImGui::Begin("Variables");
 
-        for (auto& var_info : variables) {
-            if (var_info.isLocked) {
-                ImGui::Text("%s =", var_info.name.c_str());
-                ImGui::SameLine();
-                std::string label = "##varname" + var_info.name;
-                ImGui::InputText(label.c_str(), &var_info.value);
-                if (ImGui::IsItemDeactivatedAfterEdit()) {
-                    current_var_info = var_info;
-                    process.Stop();
-                }
-            }
+        for (auto& varInfo : variables) {
+            DisplayVariable(varInfo);
         }
 
         ImGui::End();
