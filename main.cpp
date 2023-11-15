@@ -116,7 +116,7 @@ lldb::SBValue FindVariableById(lldb::SBFrame& frame, uint64_t id) {
     return lldb::SBValue();
 }
 
-std::vector<lldb::SBValue> GetVariables(lldb::SBFrame& frame) {
+std::vector<lldb::SBValue> GetVariablesFromFrame(lldb::SBFrame& frame) {
     std::vector<lldb::SBValue> variables;
 
     lldb::SBValueList frameVariables = frame.GetVariables(true, true, true, true); // arguments, locals, statics, in_scope_only
@@ -127,6 +127,14 @@ std::vector<lldb::SBValue> GetVariables(lldb::SBFrame& frame) {
         }
     }
     return variables;
+}
+
+lldb::SBThread GetThread(lldb::SBProcess& process) {
+    lldb::SBThread thread = process.GetSelectedThread();
+    if (!thread) {
+        std::cerr << "Failed to get thread" << std::endl;
+    }
+    return thread;
 }
 
 std::vector<lldb::SBFrame> GetFrames(lldb::SBThread& thread) {
@@ -141,14 +149,6 @@ std::vector<lldb::SBFrame> GetFrames(lldb::SBThread& thread) {
         }
     }
     return frames;
-}
-
-lldb::SBThread GetThread(lldb::SBProcess& process) {
-    lldb::SBThread thread = process.GetSelectedThread();
-    if (!thread) {
-        std::cerr << "Failed to get thread" << std::endl;
-    }
-    return thread;
 }
 
 void UpdateVariableValue(VariableInfo& var_info) {
@@ -169,7 +169,7 @@ void UpdateVariableValue(VariableInfo& var_info) {
     std::cerr << "Failed to update value of " << var_info.name << std::endl;
 }
 
-void FetchStructMembers(lldb::SBValue& structValue, VariableInfo& parent) {
+void FetchNestedMembers(lldb::SBValue& structValue, VariableInfo& parent) {
     for (int i = 0; i < structValue.GetNumChildren(); ++i) {
         lldb::SBValue childValue = structValue.GetChildAtIndex(i);
         if (!childValue.IsValid()) continue;
@@ -179,14 +179,30 @@ void FetchStructMembers(lldb::SBValue& structValue, VariableInfo& parent) {
         parent.children.push_back(childVarInfo);
 
         if (parent.children.back().isNested) {
-            FetchStructMembers(childValue, parent.children.back());
+            FetchNestedMembers(childValue, parent.children.back());
         }
     }
 }
 
-void FetchVariablesFromFrame(lldb::SBFrame& frame, std::vector<VariableInfo>& variables) {
-    auto frameVariables = GetVariables(frame);
-    for (auto& var : frameVariables) {
+std::vector<lldb::SBValue> GetVariablesFromThread(lldb::SBThread& thread) {
+    std::vector<lldb::SBValue> variables;
+    for (auto& frame : GetFrames(thread)) {
+        auto frame_vars = GetVariablesFromFrame(frame);
+        variables.insert(variables.end(), frame_vars.begin(), frame_vars.end());
+    }
+    return variables;
+}
+
+void FetchAllVariables() {
+    auto thread = GetThread(process);
+    if (!thread) return;
+
+    auto thread_variables = GetVariablesFromThread(thread);
+    
+    variables.clear();
+    variables.reserve(thread_variables.size());
+
+    for (auto& var : thread_variables) {
         VariableInfo varInfo(var);
 
         if (std::none_of(variables.begin(), variables.end(), [&varInfo](const VariableInfo& v) {
@@ -194,23 +210,9 @@ void FetchVariablesFromFrame(lldb::SBFrame& frame, std::vector<VariableInfo>& va
         })) {
             variables.push_back(varInfo);
             if (varInfo.isNested) {
-                FetchStructMembers(var, variables.back());
+                FetchNestedMembers(var, variables.back());
             }
         }
-    }
-}
-
-void FetchAllVariables() {
-    variables.clear();
-    // FIXME: pointers to elements in a vector will
-    // get invalidated upon the vector being resized
-    variables.reserve(500);
-
-    auto thread = GetThread(process);
-    if (!thread) return;
-
-    for (auto& frame : GetFrames(thread)) {
-        FetchVariablesFromFrame(frame, variables);
     }
 }
 
