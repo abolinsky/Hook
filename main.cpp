@@ -18,8 +18,8 @@ struct VariableInfo {
         name = value.GetName();
         function_name = (name.substr(0,2) == "::") ? "" : value.GetFrame().GetFunctionName();
         this->value = value.GetValue() ? value.GetValue() : "";
+        type_name = value.GetTypeName();
         id = value.GetID();
-        isLocked = true;
 
         lldb::TypeClass typeClass = value.GetType().GetTypeClass();
         isNested = typeClass == lldb::eTypeClassStruct || typeClass == lldb::eTypeClassClass;
@@ -48,8 +48,8 @@ struct VariableInfo {
     std::string name;
     std::string function_name;
     std::string value;
+    std::string type_name;
     uint64_t id = std::numeric_limits<uint64_t>::max();
-    bool isLocked = false;
     bool isNested = false;
     std::vector<VariableInfo> children;
     VariableInfo* parent = nullptr;
