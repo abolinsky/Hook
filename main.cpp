@@ -38,6 +38,41 @@ lldb::SBProcess process;
 
 GLFWwindow* window = nullptr;
 
+void PublishChange(const VariableInfo& varInfo) {
+    current_var_info = varInfo;
+    published_changes = false;
+    process.Stop();
+}
+
+void DisplayVariable(const VariableInfo& varInfo) {
+    std::string prefix = varInfo.parent ? "" : varInfo.function_name.empty() ? "" : "(" + varInfo.function_name + ") ");
+    ImGui::Text("%s%s =", prefix.c_str(), varInfo.name.c_str());
+    ImGui::SameLine();
+
+    if (varInfo.isNested) {
+        std::string treeNodeLabel = "##varname" + std::to_string(varInfo.id);
+        if (ImGui::TreeNode(treeNodeLabel.c_str())) {
+            for (const auto& childVar : varInfo.children) {
+                DisplayVariable(childVar);
+            }
+            ImGui::TreePop();
+        }
+    } else {
+        std::string inputTextLabel = "##varname" + varInfo.function_name + varInfo.name;
+        ImGui::InputText(inputTextLabel.c_str(), const_cast<std::string*>(&varInfo.value));
+
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            PublishChange(varInfo);
+        }
+    }
+}
+
+void Draw() {
+    ImGui::Begin("Variables");
+    for (const auto& var : variables) {
+        DisplayVariable(var);
+    }
+}
 
 void UpdateVariableValue(VariableInfo& var_info) {
     lldb::SBThread thread = process.GetSelectedThread();
@@ -84,48 +119,6 @@ void UpdateVariableValue(VariableInfo& var_info) {
         if (!value.IsValid() || !value.GetValue()) {
             std::cerr << "Failed to update value of variable " << var_info.name << std::endl;
             return;
-        }
-    }
-}
-
-void DisplayVariable(const VariableInfo& varInfo) {
-    if (varInfo.isNested) {
-        if (varInfo.parent) {
-            ImGui::Text("%s =", varInfo.name.c_str());
-        } else {
-            if (varInfo.function_name.empty()) {
-                ImGui::Text("%s =", varInfo.name.c_str());
-            } else {
-                ImGui::Text("(%s) %s =", varInfo.function_name.c_str(), varInfo.name.c_str());
-            }
-        }
-        ImGui::SameLine();
-        if (ImGui::TreeNode((std::string("##varname") + std::to_string(varInfo.id)).c_str())) {
-            for (const auto& childVar : varInfo.children) {
-                DisplayVariable(childVar);
-            }
-            ImGui::TreePop();
-        }
-    } else {
-        if (!varInfo.parent) {
-            if (varInfo.function_name.empty()) {
-                ImGui::Text("%s =", varInfo.name.c_str());
-            } else {
-                ImGui::Text("(%s) %s =", varInfo.function_name.c_str(), varInfo.name.c_str());
-            }
-        } else {
-            ImGui::Text("%s =", varInfo.name.c_str());
-        }
-        
-        ImGui::SameLine();
-        std::string label = "##varname" + varInfo.function_name + varInfo.name;
-
-        ImGui::InputText(label.c_str(), const_cast<std::string*>(&varInfo.value));
-
-        if (ImGui::IsItemDeactivatedAfterEdit()) {
-            current_var_info = varInfo;
-            published_changes = false;
-            process.Stop();
         }
     }
 }
@@ -264,16 +257,11 @@ void MainLoop() {
 
         HandleLLDBProcessEvents();
 
-        // Start the Dear ImGui frame
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // Create a window with some text fields
-        ImGui::Begin("Variables");
-        for (const auto& var : variables) {
-            DisplayVariable(var);
-        }
+        Draw();
 
         ImGui::End();
 
