@@ -14,8 +14,39 @@
 
 
 struct VariableInfo {
-    std::string function_name;
+    VariableInfo(lldb::SBValue& value) {
+        name = value.GetName();
+        function_name = (name.substr(0,2) == "::") ? "" : value.GetFrame().GetFunctionName();
+        this->value = value.GetValue() ? value.GetValue() : "";
+        id = value.GetID();
+        isLocked = true;
+
+        lldb::TypeClass typeClass = value.GetType().GetTypeClass();
+        isNested = typeClass == lldb::eTypeClassStruct || typeClass == lldb::eTypeClassClass;
+    }
+
+    VariableInfo() = default;
+
+    const VariableInfo& GetRoot() const {
+        const VariableInfo* root = this;
+        while (root->parent) {
+            root = root->parent;
+        }
+        return *root;
+    }
+
+    std::string GetFullyQualifiedName() const {
+        std::string full_name = name;
+        const VariableInfo* root = this;
+        while (root->parent) {
+            root = root->parent;
+            full_name = root->name + "." + full_name;
+        }
+        return full_name;
+    }
+
     std::string name;
+    std::string function_name;
     std::string value;
     uint64_t id = std::numeric_limits<uint64_t>::max();
     bool isLocked = false;
@@ -45,7 +76,7 @@ void PublishChange(const VariableInfo& varInfo) {
 }
 
 void DisplayVariable(const VariableInfo& varInfo) {
-    std::string prefix = varInfo.parent ? "" : varInfo.function_name.empty() ? "" : "(" + varInfo.function_name + ") ");
+    std::string prefix = varInfo.parent ? "" : varInfo.function_name.empty() ? "" : "(" + varInfo.function_name + ") ";
     ImGui::Text("%s%s =", prefix.c_str(), varInfo.name.c_str());
     ImGui::SameLine();
 
@@ -74,148 +105,111 @@ void Draw() {
     }
 }
 
-void UpdateVariableValue(VariableInfo& var_info) {
-    lldb::SBThread thread = process.GetSelectedThread();
-    if (!thread.IsValid()) {
-        std::cerr << "Failed to get thread" << std::endl;
-        return;
+lldb::SBValue FindVariableById(lldb::SBFrame& frame, uint64_t id) {
+    lldb::SBValueList vars = frame.GetVariables(true, true, true, true);
+    for (int i = 0; i < vars.GetSize(); ++i) {
+        lldb::SBValue v = vars.GetValueAtIndex(i);
+        if (v.GetID() == id) {
+            return v;
+        }
     }
+    return lldb::SBValue();
+}
 
-    bool hard_break = false;
-    auto num_frames = thread.GetNumFrames();
+std::vector<lldb::SBValue> GetVariables(lldb::SBFrame& frame) {
+    std::vector<lldb::SBValue> variables;
+
+    lldb::SBValueList frameVariables = frame.GetVariables(true, true, true, true); // arguments, locals, statics, in_scope_only
+    for (int i = 0; i < frameVariables.GetSize(); i++) {
+        lldb::SBValue var = frameVariables.GetValueAtIndex(i);
+        if (var) {
+            variables.push_back(var);
+        }
+    }
+    return variables;
+}
+
+std::vector<lldb::SBFrame> GetFrames(lldb::SBThread& thread) {
+    std::vector<lldb::SBFrame> frames;
+    const auto num_frames = thread.GetNumFrames();
+    frames.reserve(num_frames);
+
     for (auto i = 0; i < num_frames; ++i) {
         lldb::SBFrame frame = thread.GetFrameAtIndex(i);
-        if (!frame.IsValid()) {
-            std::cerr << "No valid frame selected." << std::endl;
-            continue;
-        }
-
-        std::string full_qualified_name = var_info.name;
-        const VariableInfo* root = &var_info;
-        while (true) {
-            if (root->parent) {
-                root = root->parent;
-                full_qualified_name = root->name + "." + full_qualified_name;
-            } else {
-                break;
-            }
-        }
-
-        lldb::SBValueList vars = frame.GetVariables(true, true, true, true);
-        lldb::SBValue var;
-        for (int j = 0; j < vars.GetSize(); ++j) {
-            auto v = vars.GetValueAtIndex(j);
-            if (v.GetID() == root->id) {
-                var = v;
-                break;
-            }
-        }
-        if (!var.IsValid()) {
-            continue;
-        }
-        
-        std::string expression = full_qualified_name + " = " + var_info.value;
-        lldb::SBValue value = frame.EvaluateExpression(expression.c_str());
-        if (!value.IsValid() || !value.GetValue()) {
-            std::cerr << "Failed to update value of variable " << var_info.name << std::endl;
-            return;
+        if (frame) {
+            frames.push_back(frame);
         }
     }
+    return frames;
+}
+
+lldb::SBThread GetThread(lldb::SBProcess& process) {
+    lldb::SBThread thread = process.GetSelectedThread();
+    if (!thread) {
+        std::cerr << "Failed to get thread" << std::endl;
+    }
+    return thread;
+}
+
+void UpdateVariableValue(VariableInfo& var_info) {
+    auto thread = GetThread(process);
+    if (!thread) return;
+
+    std::string fully_qualified_name = var_info.GetFullyQualifiedName();
+    std::string expression = fully_qualified_name + " = " + var_info.value;
+
+    for (auto& frame : GetFrames(thread)) {
+        lldb::SBValue var = FindVariableById(frame, var_info.GetRoot().id);
+        if (!var) continue;
+
+        lldb::SBValue value = frame.EvaluateExpression(expression.c_str());
+        if (value && value.GetValue()) return;
+    }
+
+    std::cerr << "Failed to update value of " << var_info.name << std::endl;
 }
 
 void FetchStructMembers(lldb::SBValue& structValue, VariableInfo& parent) {
     for (int i = 0; i < structValue.GetNumChildren(); ++i) {
         lldb::SBValue childValue = structValue.GetChildAtIndex(i);
-        if (childValue.IsValid()) {
-            lldb::TypeClass typeClass = childValue.GetType().GetTypeClass();
-            bool isStruct = typeClass == lldb::eTypeClassStruct;
-            bool isClass = typeClass == lldb::eTypeClassClass;
-            bool childIsNested = isStruct || isClass;
+        if (!childValue.IsValid()) continue;
 
-            VariableInfo childVarInfo {
-                .function_name = parent.function_name,
-                .name = childValue.GetName(),
-                .value = childValue.GetValue() ? childValue.GetValue() : "",
-                .id = childValue.GetID(),
-                .isLocked = true,
-                .isNested = childIsNested,
-                .parent = &parent
-            };
+        VariableInfo childVarInfo(childValue);
+        childVarInfo.parent = &parent;
+        parent.children.push_back(childVarInfo);
 
-            parent.children.push_back(childVarInfo);
-
-            if (childIsNested) {
-                FetchStructMembers(childValue, parent.children.back());
-            }
-
+        if (parent.children.back().isNested) {
+            FetchStructMembers(childValue, parent.children.back());
         }
     }
 }
 
 void FetchVariablesFromFrame(lldb::SBFrame& frame, std::vector<VariableInfo>& variables) {
-    lldb::SBValueList frameVariables = frame.GetVariables(true, true, true, true); // arguments, locals, statics, in_scope_only
+    auto frameVariables = GetVariables(frame);
+    for (auto& var : frameVariables) {
+        VariableInfo varInfo(var);
 
-    for (int i = 0; i < frameVariables.GetSize(); i++) {
-        lldb::SBValue var = frameVariables.GetValueAtIndex(i);
-        if (var.IsValid()) {
-            lldb::TypeClass typeClass = var.GetType().GetTypeClass();
-            bool isStruct = typeClass == lldb::eTypeClassStruct;
-            bool isClass = typeClass == lldb::eTypeClassClass;
-            bool isNested = isStruct || isClass;
-            
-            VariableInfo varInfo {
-                .function_name = frame.GetFunction().GetName(),
-                .name = var.GetName(),
-                .value = var.GetValue() ? var.GetValue() : "",
-                .id = var.GetID(),
-                .isLocked = true,
-                .isNested = isNested
-            };
-
-            if (varInfo.name.substr(0,2) == "::") {
-                varInfo.function_name = "";
-            } else {
-                varInfo.function_name = frame.GetFunctionName();
-            }
-
-            bool already_exists = false;
-            for (const auto& var : variables) {
-                if (var.function_name == varInfo.function_name && var.name == varInfo.name) {
-                    already_exists = true;
-                    break;
-                }
-            }
-
-            if (!already_exists) {
-                variables.push_back(varInfo);
-            }
-
-            if (isNested) {
+        if (std::none_of(variables.begin(), variables.end(), [&varInfo](const VariableInfo& v) {
+            return v.function_name == varInfo.function_name && v.name == varInfo.name;
+        })) {
+            variables.push_back(varInfo);
+            if (varInfo.isNested) {
                 FetchStructMembers(var, variables.back());
             }
-
         }
     }
 }
 
 void FetchAllVariables() {
     variables.clear();
-    variables.reserve(500); // FIXME
+    // FIXME: pointers to elements in a vector will
+    // get invalidated upon the vector being resized
+    variables.reserve(500);
 
-    lldb::SBThread thread = process.GetSelectedThread();
-    if (!thread.IsValid()) {
-        std::cerr << "No valid thread selected." << std::endl;
-        return;
-    }
+    auto thread = GetThread(process);
+    if (!thread) return;
 
-    auto num_frames = thread.GetNumFrames();
-    for (auto i = 0; i < num_frames; ++i) {
-        lldb::SBFrame frame = thread.GetFrameAtIndex(i);
-        if (!frame.IsValid()) {
-            std::cerr << "No valid frame selected." << std::endl;
-            return;
-        }
-
+    for (auto& frame : GetFrames(thread)) {
         FetchVariablesFromFrame(frame, variables);
     }
 }
