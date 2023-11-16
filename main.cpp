@@ -59,8 +59,6 @@ std::vector<VariableInfo> variables;
 VariableInfo current_var_info;
 bool published_changes = true;
 
-constexpr unsigned long long delay = 500;
-
 lldb::SBDebugger debugger;
 lldb::SBTarget target;
 lldb::SBListener listener;
@@ -166,7 +164,7 @@ void UpdateVariableValue(VariableInfo& var_info) {
         if (value && value.GetValue()) return;
     }
 
-    std::cerr << "Failed to update value of " << var_info.name << std::endl;
+    std::cerr << "Failed to update value of " << var_info->GetFullyQualifiedName() << std::endl;
 }
 
 void FetchNestedMembers(lldb::SBValue& structValue, VariableInfo& parent) {
@@ -247,7 +245,6 @@ void MainLoop() {
     FetchAllVariables();
     process.Continue();
 
-    unsigned long long delay_tick = 0;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
@@ -266,8 +263,6 @@ void MainLoop() {
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(window);
-
-        ++delay_tick % delay == 0 && process.Stop();
     }
 }
 
