@@ -51,12 +51,12 @@ struct VariableInfo {
     std::string type_name;
     uint64_t id = std::numeric_limits<uint64_t>::max();
     bool isNested = false;
-    std::vector<VariableInfo> children;
+    std::vector<VariableInfo*> children;
     VariableInfo* parent = nullptr;
 };
 
 std::vector<VariableInfo> variables;
-VariableInfo current_var_info;
+const VariableInfo* current_var_info;
 bool published_changes = true;
 
 lldb::SBDebugger debugger;
@@ -68,7 +68,7 @@ lldb::SBProcess process;
 GLFWwindow* window = nullptr;
 
 void PublishChange(const VariableInfo& varInfo) {
-    current_var_info = varInfo;
+    current_var_info = &varInfo;
     published_changes = false;
     process.Stop();
 }
@@ -81,8 +81,8 @@ void DisplayVariable(const VariableInfo& varInfo) {
     if (varInfo.isNested) {
         std::string treeNodeLabel = "##varname" + std::to_string(varInfo.id);
         if (ImGui::TreeNode(treeNodeLabel.c_str())) {
-            for (const auto& childVar : varInfo.children) {
-                DisplayVariable(childVar);
+            for (auto childVar : varInfo.children) {
+                DisplayVariable(*childVar);
             }
             ImGui::TreePop();
         }
@@ -98,8 +98,10 @@ void DisplayVariable(const VariableInfo& varInfo) {
 
 void Draw() {
     ImGui::Begin("Variables");
-    for (const auto& var : variables) {
-        DisplayVariable(var);
+    for (auto& var : variables) {
+        if (!var.parent) {
+            DisplayVariable(var);
+        }
     }
 }
 
@@ -149,15 +151,15 @@ std::vector<lldb::SBFrame> GetFrames(lldb::SBThread& thread) {
     return frames;
 }
 
-void UpdateVariableValue(VariableInfo& var_info) {
+void UpdateVariableValue(const VariableInfo* var_info) {
     auto thread = GetThread(process);
     if (!thread) return;
 
-    std::string fully_qualified_name = var_info.GetFullyQualifiedName();
-    std::string expression = fully_qualified_name + " = " + var_info.value;
+    std::string fully_qualified_name = var_info->GetFullyQualifiedName();
+    std::string expression = fully_qualified_name + " = " + var_info->value;
 
     for (auto& frame : GetFrames(thread)) {
-        lldb::SBValue var = FindVariableById(frame, var_info.GetRoot().id);
+        lldb::SBValue var = FindVariableById(frame, var_info->GetRoot().id);
         if (!var) continue;
 
         lldb::SBValue value = frame.EvaluateExpression(expression.c_str());
@@ -172,12 +174,12 @@ void FetchNestedMembers(lldb::SBValue& structValue, VariableInfo& parent) {
         lldb::SBValue childValue = structValue.GetChildAtIndex(i);
         if (!childValue.IsValid()) continue;
 
-        VariableInfo childVarInfo(childValue);
-        childVarInfo.parent = &parent;
-        parent.children.push_back(childVarInfo);
+        variables.emplace_back(childValue);
+        variables.back().parent = &parent;
+        parent.children.push_back(&variables.back());
 
-        if (parent.children.back().isNested) {
-            FetchNestedMembers(childValue, parent.children.back());
+        if (parent.children.back()->isNested) {
+            FetchNestedMembers(childValue, *parent.children.back());
         }
     }
 }
@@ -198,10 +200,10 @@ void FetchAllVariables() {
     auto thread_variables = GetVariablesFromThread(thread);
     
     variables.clear();
-    variables.reserve(thread_variables.size());
+    variables.reserve(thread_variables.size() * 100);
 
     for (auto& var : thread_variables) {
-        VariableInfo varInfo(var);
+        const VariableInfo varInfo(var);
 
         if (std::none_of(variables.begin(), variables.end(), [&varInfo](const VariableInfo& v) {
             return v.function_name == varInfo.function_name && v.name == varInfo.name;
