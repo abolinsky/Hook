@@ -85,7 +85,7 @@ void PublishChange(const VariableInfo& varInfo) {
 }
 
 void DisplayVariable(const VariableInfo& varInfo) {
-    std::string prefix = varInfo.parent ? "" : varInfo.function_name.empty() ? "" : "(" + varInfo.function_name + ") ";
+    std::string prefix = !varInfo.IsRoot() ? "" : varInfo.function_name.empty() ? "" : "(" + varInfo.function_name + ") ";
     ImGui::Text("%s%s =", prefix.c_str(), varInfo.name.c_str());
     ImGui::SameLine();
 
@@ -110,7 +110,7 @@ void DisplayVariable(const VariableInfo& varInfo) {
 void Draw() {
     ImGui::Begin("Variables");
     for (auto& var : variables) {
-        if (!var.parent) {
+        if (var.IsRoot()) {
             DisplayVariable(var);
         }
     }
