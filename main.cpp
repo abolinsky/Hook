@@ -17,8 +17,13 @@ struct VariableInfo {
     VariableInfo(lldb::SBValue& value) {
         name = value.GetName();
         function_name = (name.substr(0,2) == "::") ? "" : value.GetFrame().GetFunctionName();
+        
+        if (value.GetType().GetCanonicalType().GetBasicType() == lldb::eBasicTypeUnsignedChar) {
+            value.SetFormat(lldb::Format::eFormatDecimal);
+        }
         this->value = value.GetValue() ? value.GetValue() : "";
         type_name = value.GetTypeName();
+        
         id = value.GetID();
 
         lldb::TypeClass typeClass = value.GetType().GetTypeClass();
@@ -99,8 +104,17 @@ void DisplayVariable(const VariableInfo& varInfo) {
         }
     } else {
         std::string inputTextLabel = "##varname" + varInfo.function_name + varInfo.name;
-        ImGui::InputText(inputTextLabel.c_str(), const_cast<std::string*>(&varInfo.value));
-
+        if (varInfo.type_name == "bool") {
+            bool value = varInfo.value == "true";
+            ImGui::Checkbox(inputTextLabel.c_str(), &value);
+            const_cast<std::string&>(varInfo.value) = value ? "true" : "false";
+        } else if (varInfo.type_name == "uint8_t") {
+            int value = std::stoi(varInfo.value);
+            ImGui::SliderInt(inputTextLabel.c_str(), &value, std::numeric_limits<uint8_t>::min(), std::numeric_limits<uint8_t>::max());
+            const_cast<std::string&>(varInfo.value) = std::to_string(value);
+        } else {
+            ImGui::InputText(inputTextLabel.c_str(), const_cast<std::string*>(&varInfo.value));
+        }
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             PublishChange(varInfo);
         }
