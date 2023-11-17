@@ -35,12 +35,23 @@ struct VariableInfo {
         return *root;
     }
 
+    bool IsRoot() const {
+        return !parent;
+    }
+
+    bool ParentIsContainer() const {
+        return name.back() == ']';
+    }
+
     std::string GetFullyQualifiedName() const {
-        std::string full_name = name;
-        const VariableInfo* root = this;
-        while (root->parent) {
-            root = root->parent;
-            full_name = root->name + "." + full_name;
+        std::string full_name;
+        const VariableInfo* current = this;
+        while (current != nullptr) {
+            full_name = current->name + full_name;
+            if (!current->IsRoot() && !current->ParentIsContainer()) {
+                full_name = "." + full_name;
+            }
+            current = current->parent;
         }
         return full_name;
     }
