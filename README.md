@@ -1,4 +1,6 @@
-<img align="left" width="256" height="256" src="https://github.com/abolinsky/hook/assets/5623716/e1ff852a-0216-4bc4-8706-a8c56529abb8"/>
+<p align="center">
+  <img width="256" height="256" src="https://github.com/abolinsky/hook/assets/5623716/e1ff852a-0216-4bc4-8706-a8c56529abb8"/>
+</p>
 
 # hook
 hook is a simple and intuitive real-time **graphical C/C++ runtime editor**. It attaches to any running process and allows you to change the value of variables live, without the need to go through the time-consuming edit-compile-run flow. This allows rapid prototyping.
