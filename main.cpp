@@ -132,7 +132,7 @@ void DisplayVariable(const VariableInfo& varInfo) {
 }
 
 void Draw() {
-    ImGui::Begin("Variables");
+    ImGui::Begin("Variables", nullptr, ImGuiWindowFlags_NoDecoration);
     for (auto& var : variables) {
         if (var.IsRoot()) {
             DisplayVariable(var);
@@ -269,28 +269,46 @@ void HandleLLDBProcessEvents() {
     }
 }
 
+void FrontendPreDraw() {
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+
+    ImGuiIO& io = ImGui::GetIO();
+    ImGui::SetNextWindowSize(io.DisplaySize);
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+}
+
+void FrontendPostDraw() {
+    ImGui::End();
+    ImGui::Render();
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+}
+
+void BackendPreDraw() {
+    glfwPollEvents();
+}
+
+void BackendPostDraw() {
+    glfwSwapBuffers(window);
+}
+
+bool ShouldRemainOpen() {
+    return !glfwWindowShouldClose(window);
+}
+
 void MainLoop() {
     FetchAllVariables();
     process.Continue();
 
-    while (!glfwWindowShouldClose(window)) {
-        glfwPollEvents();
-
+    while (ShouldRemainOpen()) {
         HandleLLDBProcessEvents();
 
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-
+        BackendPreDraw();
+        FrontendPreDraw();
         Draw();
-
-        ImGui::End();
-
-        // Rendering
-        ImGui::Render();
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-        glfwSwapBuffers(window);
+        FrontendPostDraw();
+        BackendPostDraw();
     }
 }
 
@@ -314,6 +332,7 @@ bool SetupGraphics() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // Required on Mac
+    glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_TRUE);
 #else
     // GL 3.0 + GLSL 130
     const char* glsl_version = "#version 130";
@@ -331,7 +350,6 @@ bool SetupGraphics() {
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
@@ -376,6 +394,8 @@ bool SetupDebugger(const std::string& process_string) {
     } catch (...) {
         return false;
     }
+
+    return SetupEventListener();
 }
 
 int main(int argc, char** argv) {
@@ -387,7 +407,6 @@ int main(int argc, char** argv) {
     std::string process_string = argv[1];
 
     if (!SetupDebugger(process_string)) return -1;
-    if (!SetupEventListener()) return -1;
     if (!SetupGraphics()) return -1;
 
     MainLoop();
