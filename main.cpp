@@ -3,34 +3,43 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
+#include <GLFW/glfw3.h>
+#include <lldb/API/LLDB.h>
+
 #include <iostream>
 #include <vector>
 #include <string>
 #include <sstream>
 #include <limits>
 
-#include <GLFW/glfw3.h>
-#include <lldb/API/LLDB.h>
-
 
 struct VariableInfo {
     VariableInfo(lldb::SBValue& value) {
-        name = value.GetName();
-        function_name = (name.substr(0,2) == "::") ? "" : value.GetFrame().GetFunctionName();
-        
-        if (value.GetType().GetCanonicalType().GetBasicType() == lldb::eBasicTypeUnsignedChar) {
+        this->name = value.GetName();
+        this->function_name = (name.substr(0,2) == "::") ? "" : value.GetFrame().GetFunctionName();
+        this->id = value.GetID();
+
+        this->type = value.GetType().GetCanonicalType();
+        while (type.GetTypeClass() == lldb::eTypeClassTypedef) {
+            this->type.GetTypedefedType();
+        }
+
+        this->basic_type = this->type.GetBasicType();
+        if (this->basic_type == lldb::eBasicTypeUnsignedChar) {
             value.SetFormat(lldb::Format::eFormatDecimal);
         }
-        this->value = value.GetValue() ? value.GetValue() : "";
-        type_name = value.GetTypeName();
-        
-        id = value.GetID();
 
-        lldb::TypeClass typeClass = value.GetType().GetTypeClass();
-        isNested = typeClass == lldb::eTypeClassStruct || typeClass == lldb::eTypeClassClass;
+        this->is_nested = this->type.IsAggregateType();
+        if (!this->is_nested) {
+            this->value = value.GetValue();
+        }
     }
 
     VariableInfo() = default;
+
+    bool IsAggregateType() const {
+        return is_nested;
+    }
 
     const VariableInfo& GetRoot() const {
         const VariableInfo* root = this;
@@ -64,9 +73,10 @@ struct VariableInfo {
     std::string name;
     std::string function_name;
     std::string value;
-    std::string type_name;
+    lldb::SBType type;
+    lldb::BasicType basic_type;
+    bool is_nested = false;
     uint64_t id = std::numeric_limits<uint64_t>::max();
-    bool isNested = false;
     std::vector<VariableInfo*> children;
     VariableInfo* parent = nullptr;
 };
@@ -94,7 +104,7 @@ void DisplayVariable(const VariableInfo& varInfo) {
     ImGui::Text("%s%s =", prefix.c_str(), varInfo.name.c_str());
     ImGui::SameLine();
 
-    if (varInfo.isNested) {
+    if (varInfo.IsAggregateType()) {
         std::string treeNodeLabel = "##varname" + std::to_string(varInfo.id);
         if (ImGui::TreeNode(treeNodeLabel.c_str())) {
             for (auto childVar : varInfo.children) {
@@ -104,11 +114,11 @@ void DisplayVariable(const VariableInfo& varInfo) {
         }
     } else {
         std::string inputTextLabel = "##varname" + varInfo.function_name + varInfo.name;
-        if (varInfo.type_name == "bool") {
+        if (varInfo.basic_type == lldb::eBasicTypeBool) {
             bool value = varInfo.value == "true";
             ImGui::Checkbox(inputTextLabel.c_str(), &value);
             const_cast<std::string&>(varInfo.value) = value ? "true" : "false";
-        } else if (varInfo.type_name == "uint8_t") {
+        } else if (varInfo.basic_type == lldb::eBasicTypeUnsignedChar) {
             int value = std::stoi(varInfo.value);
             ImGui::SliderInt(inputTextLabel.c_str(), &value, std::numeric_limits<uint8_t>::min(), std::numeric_limits<uint8_t>::max());
             const_cast<std::string&>(varInfo.value) = std::to_string(value);
@@ -194,16 +204,16 @@ void UpdateVariableValue(const VariableInfo* var_info) {
     std::cerr << "Failed to update value of " << var_info->GetFullyQualifiedName() << std::endl;
 }
 
-void FetchNestedMembers(lldb::SBValue& structValue, VariableInfo& parent) {
-    for (int i = 0; i < structValue.GetNumChildren(); ++i) {
-        lldb::SBValue childValue = structValue.GetChildAtIndex(i);
+void FetchNestedMembers(lldb::SBValue& aggregateValue, VariableInfo& parent) {
+    for (int i = 0; i < aggregateValue.GetNumChildren(); ++i) {
+        lldb::SBValue childValue = aggregateValue.GetChildAtIndex(i);
         if (!childValue.IsValid()) continue;
 
         variables.emplace_back(childValue);
         variables.back().parent = &parent;
         parent.children.push_back(&variables.back());
 
-        if (parent.children.back()->isNested) {
+        if (parent.children.back()->IsAggregateType()) {
             FetchNestedMembers(childValue, *parent.children.back());
         }
     }
@@ -229,12 +239,11 @@ void FetchAllVariables() {
 
     for (auto& var : thread_variables) {
         const VariableInfo varInfo(var);
-
         if (std::none_of(variables.begin(), variables.end(), [&varInfo](const VariableInfo& v) {
             return v.function_name == varInfo.function_name && v.name == varInfo.name;
         })) {
             variables.push_back(varInfo);
-            if (varInfo.isNested) {
+            if (varInfo.IsAggregateType()) {
                 FetchNestedMembers(var, variables.back());
             }
         }
@@ -247,21 +256,13 @@ void HandleLLDBProcessEvents() {
         if (lldb::SBProcess::EventIsProcessEvent(event)) {
             lldb::StateType state = lldb::SBProcess::GetStateFromEvent(event);
 
-            switch (state) {
-                case lldb::eStateStopped:
-                    if (!published_changes) {
-                        UpdateVariableValue(current_var_info);
-                        published_changes = true;
-                    }
-                    FetchAllVariables();
-                    process.Continue();
-                    break;
-                case lldb::eStateRunning:
-                    break;
-                case lldb::eStateExited:
-                    break;
-                default:
-                    break;
+            if (state == lldb::eStateStopped) {
+                if (!published_changes) {
+                    UpdateVariableValue(current_var_info);
+                    published_changes = true;
+                }
+                FetchAllVariables();
+                process.Continue();
             }
         }
         listener.GetNextEvent(event);
