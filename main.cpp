@@ -330,8 +330,10 @@ void TearDownGraphics() {
     glfwTerminate();
 }
 
-bool SetupGraphics() {
-    if (!glfwInit()) return false;
+void SetupGraphics() {
+    if (!glfwInit()) {
+        throw std::runtime_error("Could not initialize graphics");
+    }
 
     // Decide GL+GLSL versions
 #if __APPLE__
@@ -352,7 +354,9 @@ bool SetupGraphics() {
 #endif
 
     window = glfwCreateWindow(640, 480, "hook", NULL, NULL);
-    if (window == NULL) return false;
+    if (window == NULL) {
+        throw std::runtime_error("Could not create window");
+    }
 
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1); // Enable vsync
@@ -362,31 +366,29 @@ bool SetupGraphics() {
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
-
-    return true;
 }
 
-bool SetupEventListener() {
+void SetupEventListener() {
     listener = debugger.GetListener();
     auto event_mask = lldb::SBProcess::eBroadcastBitStateChanged;
     auto event_bits = process.GetBroadcaster().AddListener(listener, event_mask);
-    return event_bits == event_mask;
+    if (event_bits != event_mask) {
+        throw std::runtime_error("Could not set up event listener");
+    }
 }
 
-bool AttachToProcess(lldb::SBAttachInfo& attachInfo) {
+void AttachToProcess(lldb::SBAttachInfo& attachInfo) {
     target = debugger.CreateTarget("");
     process = target.Attach(attachInfo, error);
     if (!process.IsValid() || error.Fail()) {
-        std::cerr << "Failed to attach to process: " << error.GetCString() << std::endl;
-        return false;
+        throw std::runtime_error(std::string("Failed to attach to process: ") + error.GetCString());
     }
-    return true;
 }
 
-bool AttachToProcessWithID(lldb::pid_t pid) {
+void AttachToProcessWithID(lldb::pid_t pid) {
     lldb::SBAttachInfo attachInfo;
     attachInfo.SetProcessID(pid);
-    return AttachToProcess(attachInfo);
+    AttachToProcess(attachInfo);
 }
 
 void SetStyles() {
@@ -467,18 +469,14 @@ void TearDownDebugger() {
     lldb::SBDebugger::Destroy(debugger);
 }
 
-bool SetupDebugger(const std::string& process_string) {
+void SetupDebugger(const std::string& process_string) {
     lldb::SBDebugger::Initialize();
     debugger = lldb::SBDebugger::Create();
 
-    try {
-        lldb::pid_t pid = std::stol(process_string);
-        return AttachToProcessWithID(pid);
-    } catch (...) {
-        return false;
-    }
+    lldb::pid_t pid = std::stol(process_string);
+    AttachToProcessWithID(pid);
 
-    return SetupEventListener();
+    SetupEventListener();
 }
 
 int main(int argc, char** argv) {
@@ -489,15 +487,19 @@ int main(int argc, char** argv) {
 
     std::string process_string = argv[1];
 
-    if (!SetupDebugger(process_string)) return -1;
-    if (!SetupGraphics()) return -1;
+    try {
+        SetupDebugger(process_string);
+        SetupGraphics();
 
-    SetStyles();
-    FetchAllVariables();
-    process.Continue();
+        SetStyles();
+        FetchAllVariables();
+        process.Continue();
 
-    MainLoop();
+        MainLoop();
 
-    TearDownGraphics();
-    TearDownDebugger();
+        TearDownGraphics();
+        TearDownDebugger();
+    } catch (const std::exception& e) {
+        std::cout << e.what() << std::endl;
+    }
 }
