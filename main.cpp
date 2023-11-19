@@ -119,9 +119,10 @@ void DisplayVariable(const VariableInfo& varInfo) {
             ImGui::Checkbox(inputTextLabel.c_str(), &value);
             const_cast<std::string&>(varInfo.value) = value ? "true" : "false";
         } else if (varInfo.basic_type == lldb::eBasicTypeUnsignedChar) {
-            int value = std::stoi(varInfo.value);
-            ImGui::SliderInt(inputTextLabel.c_str(), &value, std::numeric_limits<uint8_t>::min(), std::numeric_limits<uint8_t>::max());
-            const_cast<std::string&>(varInfo.value) = std::to_string(value);
+            uint8_t value = std::stoul(varInfo.value);
+            int value_int = value;
+            ImGui::SliderInt(inputTextLabel.c_str(), &value_int, std::numeric_limits<uint8_t>::min(), std::numeric_limits<uint8_t>::max());
+            const_cast<std::string&>(varInfo.value) = std::to_string(value_int);
         } else {
             ImGui::InputText(inputTextLabel.c_str(), const_cast<std::string*>(&varInfo.value));
         }
