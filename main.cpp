@@ -95,6 +95,7 @@ struct VariableInfo {
 std::vector<VariableInfo> variables;
 const VariableInfo* current_var_info;
 bool published_changes = true;
+bool open_pid_popup = true;
 
 lldb::SBDebugger debugger;
 lldb::SBTarget target;
@@ -223,8 +224,18 @@ void DisplayVariable(VariableInfo& varInfo) {
             }
             ImGui::SameLine(); HelpMarker("CTRL+click to input value");
             varInfo.value = std::to_string(value);
+        } else if (varInfo.basic_type == lldb::eBasicTypeInt) {
+            int value = std::stoi(varInfo.value);
+            static auto min = std::numeric_limits<int>::min() / 2;
+            static auto max = std::numeric_limits<int>::max() / 2;
+            ImGui::SliderScalar(inputTextLabel.c_str(), ImGuiDataType_S32, &value, &min , &max);
+            if (ImGui::IsItemDeactivatedAfterEdit()) {
+                PublishChange(varInfo);
+            }
+            ImGui::SameLine(); HelpMarker("CTRL+click to input value");
+            varInfo.value = std::to_string(value);
         } else {
-            ImGui::InputText(inputTextLabel.c_str(), &varInfo.value);
+            ImGui::InputText(inputTextLabel.c_str(), &varInfo.value, ImGuiInputTextFlags_CharsDecimal);
             if (ImGui::IsItemDeactivatedAfterEdit()) {
                 PublishChange(varInfo);
             }
@@ -308,156 +319,94 @@ void HandleAttachProcess() {
     process.Continue();
 }
 
-void Draw() {
-    ImGui::NewFrame();
+void StyleColorsFunky() {
+    auto yellow = ImVec4{0.996, 0.780, 0.008, 1.0};
+    auto dark_yellow = ImVec4{0.664, 0.520, 0.005, 1.0};
+    auto blue = ImVec4{0.090, 0.729, 0.808, 1.0};
+    auto green = ImVec4{0.149, 0.918, 0.694, 1.0};
+    auto white = ImVec4{0.996, 0.996, 0.996, 1.0};
+    auto red = ImVec4{1.000, 0.353, 0.322, 1.0};
+    auto dark_red = ImVec4{0.666, 0.235, 0.215, 1.0};
+    auto dark_gray = ImVec4{0.1f, 0.1f, 0.13f, 1.0};
+    auto middle_gray = ImVec4{0.5f, 0.5f, 0.5f, 1.0};
+    auto light_gray = ImVec4{0.85f, 0.85f, 0.85f, 1.0};
+    auto off_white = ImVec4{0.96f, 0.96f, 0.96f, 1.0};
+    auto black = ImVec4{0.0, 0.0, 0.0, 1.0};
 
-    ImGuiIO& io = ImGui::GetIO();
-    ImGui::SetNextWindowSize(io.DisplaySize);
-    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    auto &colors = ImGui::GetStyle().Colors;
+    colors[ImGuiCol_WindowBg] = green;
+    colors[ImGuiCol_MenuBarBg] = blue;
 
-    if (!ImGui::Begin("Variables", nullptr, ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
-        ImGui::End();
-        return;
-    }
-    
-    static bool open_pid_popup = true;
-    if (ImGui::BeginMenuBar()) {
-        if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("Attach with PID")) {
-                open_pid_popup = true;
-            }
-            ImGui::EndMenu();
-        }
-        ImGui::EndMenuBar();
-    }
+    // Border
+    colors[ImGuiCol_Border] = white;
+    colors[ImGuiCol_BorderShadow] = ImVec4{0.0f, 0.0f, 0.0f, 0.24f};
 
-    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    
-    if (ImGui::BeginPopup("AttachWithPID", ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove)) {
-        static bool attach_failed = false;
+    // Text
+    colors[ImGuiCol_Text] = black;
+    colors[ImGuiCol_TextDisabled] = middle_gray;
 
-        std::string pidInput;
-        pidInput.reserve(64);
-        ImGui::Text("PID:");
-        ImGui::SameLine();
-        ImGui::SetKeyboardFocusHere();
-        if (ImGui::InputText("##pid", &pidInput, ImGuiInputTextFlags_EnterReturnsTrue)) {
-            pid = std::stoull(pidInput);
-            try {
-                HandleAttachProcess();
-                ImGui::CloseCurrentPopup();
-                attach_failed = false;
-            } catch (...) {
-                attach_failed = true;
-            }
-        }
-        // TODO: progress bar
+    // Headers
+    colors[ImGuiCol_Header] = yellow;
+    colors[ImGuiCol_HeaderHovered] = light_gray;
+    colors[ImGuiCol_HeaderActive] = white;
 
-        if (attach_failed) {
-            ImGui::TextDisabled("(!) Could not attach to pid %llu", pid);
-        }
-        ImGui::EndPopup();
-    }
+    // Buttons
+    colors[ImGuiCol_Button] = blue;
+    colors[ImGuiCol_ButtonHovered] = white;
+    colors[ImGuiCol_ButtonActive] = ImVec4{0.16f, 0.16f, 0.21f, 1.0f};
+    colors[ImGuiCol_CheckMark] = blue;
 
-    if (open_pid_popup) {
-        open_pid_popup = false;
-        ImGui::OpenPopup("AttachWithPID");
-    }
+    // Popups
+    colors[ImGuiCol_PopupBg] = white;
 
-    for (auto& var : variables) {
-        if (var.IsRoot()) {
-            DisplayVariable(var);
-        }
-    }
+    // Slider
+    colors[ImGuiCol_SliderGrab] = yellow;
+    colors[ImGuiCol_SliderGrabActive] = white;
 
-    ImGui::End();
-    ImGui::Render();
+    // Frame BG
+    colors[ImGuiCol_FrameBg] = off_white;
+    colors[ImGuiCol_FrameBgHovered] = light_gray;
+    colors[ImGuiCol_FrameBgActive] = yellow;
+
+    // Tabs
+    colors[ImGuiCol_Tab] = ImVec4{0.16f, 0.16f, 0.21f, 1.0f};
+    colors[ImGuiCol_TabHovered] = ImVec4{0.24, 0.24f, 0.32f, 1.0f};
+    colors[ImGuiCol_TabActive] = ImVec4{0.2f, 0.22f, 0.27f, 1.0f};
+    colors[ImGuiCol_TabUnfocused] = ImVec4{0.16f, 0.16f, 0.21f, 1.0f};
+    colors[ImGuiCol_TabUnfocusedActive] = ImVec4{0.16f, 0.16f, 0.21f, 1.0f};
+
+    // Title
+    colors[ImGuiCol_TitleBg] = ImVec4{0.16f, 0.16f, 0.21f, 1.0f};
+    colors[ImGuiCol_TitleBgActive] = ImVec4{0.16f, 0.16f, 0.21f, 1.0f};
+    colors[ImGuiCol_TitleBgCollapsed] = ImVec4{0.16f, 0.16f, 0.21f, 1.0f};
+
+    // Scrollbar
+    colors[ImGuiCol_ScrollbarBg] = ImVec4{0.1f, 0.1f, 0.13f, 1.0f};
+    colors[ImGuiCol_ScrollbarGrab] = ImVec4{0.16f, 0.16f, 0.21f, 1.0f};
+    colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4{0.19f, 0.2f, 0.25f, 1.0f};
+    colors[ImGuiCol_ScrollbarGrabActive] = ImVec4{0.24f, 0.24f, 0.32f, 1.0f};
+
+    // Seperator
+    colors[ImGuiCol_Separator] = ImVec4{0.44f, 0.37f, 0.61f, 1.0f};
+    colors[ImGuiCol_SeparatorHovered] = ImVec4{0.74f, 0.58f, 0.98f, 1.0f};
+    colors[ImGuiCol_SeparatorActive] = ImVec4{0.84f, 0.58f, 1.0f, 1.0f};
+
+    // Resize Grip
+    colors[ImGuiCol_ResizeGrip] = ImVec4{0.44f, 0.37f, 0.61f, 0.29f};
+    colors[ImGuiCol_ResizeGripHovered] = ImVec4{0.74f, 0.58f, 0.98f, 0.29f};
+    colors[ImGuiCol_ResizeGripActive] = ImVec4{0.84f, 0.58f, 1.0f, 0.29f};
+
+    auto &style = ImGui::GetStyle();
+    style.TabRounding = 4;
+    style.ScrollbarRounding = 9;
+    style.WindowBorderSize = 0;
+    style.GrabRounding = 3;
+    style.FrameRounding = 3;
+    style.PopupRounding = 4;
+    style.ChildRounding = 4;
 }
 
-void UpdateVariableValue(const VariableInfo* var_info) {
-    auto thread = GetThread(process);
-    if (!thread) return;
-
-    std::string fully_qualified_name = var_info->GetFullyQualifiedName();
-    std::string expression = fully_qualified_name + " = " + var_info->GetFullyQualifiedValue();
-
-    for (auto& frame : GetFrames(thread)) {
-        lldb::SBValue var = FindVariableById(frame, var_info->GetRoot().id);
-        if (!var) continue;
-
-        lldb::SBValue value = frame.EvaluateExpression(expression.c_str());
-        if (value && value.GetValue()) return;
-    }
-
-    std::cerr << "Failed to evaluate " << expression << std::endl;
-}
-
-void HandleLLDBProcessEvents() {
-    lldb::SBEvent event;
-    while (listener.PeekAtNextEvent(event)) {
-        if (lldb::SBProcess::EventIsProcessEvent(event)) {
-            lldb::StateType state = lldb::SBProcess::GetStateFromEvent(event);
-
-            if (state == lldb::eStateStopped) {
-                if (!published_changes) {
-                    UpdateVariableValue(current_var_info);
-                    published_changes = true;
-                }
-                FetchAllVariables();
-                process.Continue();
-            }
-        }
-        listener.GetNextEvent(event);
-    }
-}
-
-void FrontendPreDraw() {
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
-    ImGui::NewFrame();
-
-    ImGuiIO& io = ImGui::GetIO();
-    ImGui::SetNextWindowSize(io.DisplaySize);
-    ImGui::SetNextWindowPos(ImVec2(0, 0));
-}
-
-void FrontendPostDraw() {
-    ImGui::End();
-    ImGui::Render();
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-}
-
-void BackendPreDraw() {
-    glfwPollEvents();
-}
-
-void BackendPostDraw() {
-    glfwSwapBuffers(window);
-}
-
-bool ShouldRemainOpen() {
-    return !glfwWindowShouldClose(window);
-}
-
-void MainLoop() {
-    while (!glfwWindowShouldClose(window)) {
-        glfwPollEvents();
-
-        HandleLLDBProcessEvents();
-
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-
-        Draw();
-
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-        glfwSwapBuffers(window);
-    }
-}
-
-void SetStyles() {
+void StyleColorsBlack() {
     auto yellow = ImVec4{0.996, 0.780, 0.008, 1.0};
     auto blue = ImVec4{0.090, 0.729, 0.808, 1.0};
     auto green = ImVec4{0.149, 0.918, 0.694, 1.0};
@@ -532,14 +481,177 @@ void SetStyles() {
     auto &style = ImGui::GetStyle();
     style.TabRounding = 4;
     style.ScrollbarRounding = 9;
+    style.WindowBorderSize = 0;
     style.GrabRounding = 3;
     style.FrameRounding = 3;
     style.PopupRounding = 4;
     style.ChildRounding = 4;
 }
 
+void Draw() {
+    ImGui::NewFrame();
+
+    ImGuiIO& io = ImGui::GetIO();
+    ImGui::SetNextWindowSize(io.DisplaySize);
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+
+    if (!ImGui::Begin("Variables", nullptr, ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
+        ImGui::End();
+        return;
+    }
+    
+    if (ImGui::BeginMenuBar()) {
+        if (ImGui::BeginMenu("File")) {
+            if (ImGui::MenuItem("Attach with PID", "Ctrl+A")) {
+                open_pid_popup = true;
+            }
+            if (ImGui::BeginMenu("Theme")) {
+                if (ImGui::MenuItem("Dark", "Ctrl+D")) {
+                    ImGui::StyleColorsDark();
+                }
+                if (ImGui::MenuItem("Light", "Ctrl+L")) {
+                    ImGui::StyleColorsLight();
+                }
+                if (ImGui::MenuItem("Classic", "Ctrl+C")) {
+                    ImGui::StyleColorsClassic();
+                }
+                if (ImGui::MenuItem("Black", "Ctrl+B")) {
+                    StyleColorsBlack();
+                }
+                if (ImGui::MenuItem("Funky", "Ctrl+F")) {
+                    StyleColorsFunky();
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    
+    if (ImGui::BeginPopup("AttachWithPID", ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove)) {
+        static bool attach_failed = false;
+
+        std::string pidInput;
+        pidInput.reserve(64);
+        ImGui::Text("PID:");
+        ImGui::SameLine();
+        ImGui::SetKeyboardFocusHere();
+        if (ImGui::InputText("##pid", &pidInput, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CharsDecimal)) {
+            pid = std::stoull(pidInput);
+            try {
+                HandleAttachProcess();
+                ImGui::CloseCurrentPopup();
+                attach_failed = false;
+            } catch (...) {
+                attach_failed = true;
+            }
+        }
+        // TODO: progress bar
+
+        if (attach_failed) {
+            ImGui::BeginDisabled();
+            ImGui::TextColored(ImVec4{1.000, 0.353, 0.322, 1.0}, "Error: Could not attach to pid %llu", pid);
+            ImGui::EndDisabled();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (open_pid_popup) {
+        open_pid_popup = false;
+        ImGui::OpenPopup("AttachWithPID");
+    }
+
+    for (auto& var : variables) {
+        if (var.IsRoot()) {
+            DisplayVariable(var);
+        }
+    }
+
+    ImGui::End();
+    ImGui::Render();
+}
+
+void UpdateVariableValue(const VariableInfo* var_info) {
+    auto thread = GetThread(process);
+    if (!thread) return;
+
+    std::string fully_qualified_name = var_info->GetFullyQualifiedName();
+    std::string expression = fully_qualified_name + " = " + var_info->GetFullyQualifiedValue();
+
+    for (auto& frame : GetFrames(thread)) {
+        lldb::SBValue var = FindVariableById(frame, var_info->GetRoot().id);
+        if (!var) continue;
+
+        lldb::SBValue value = frame.EvaluateExpression(expression.c_str());
+        if (value && value.GetValue()) return;
+    }
+
+    std::cerr << "Failed to evaluate " << expression << std::endl;
+}
+
+void HandleLLDBProcessEvents() {
+    lldb::SBEvent event;
+    while (listener.PeekAtNextEvent(event)) {
+        if (lldb::SBProcess::EventIsProcessEvent(event)) {
+            lldb::StateType state = lldb::SBProcess::GetStateFromEvent(event);
+
+            if (state == lldb::eStateStopped) {
+                if (!published_changes) {
+                    UpdateVariableValue(current_var_info);
+                    published_changes = true;
+                }
+                FetchAllVariables();
+                process.Continue();
+            }
+        }
+        listener.GetNextEvent(event);
+    }
+}
+
+void HandleKeys() {
+    if (ImGui::IsKeyDown(ImGuiKey_LeftCtrl)) {
+        if (ImGui::IsKeyDown(ImGuiKey_A)) {
+            open_pid_popup = true;
+        } else if (ImGui::IsKeyDown(ImGuiKey_D)) {
+            ImGui::StyleColorsDark(nullptr);
+        } else if (ImGui::IsKeyDown(ImGuiKey_C)) {
+            ImGui::StyleColorsClassic(nullptr);
+        } else if (ImGui::IsKeyDown(ImGuiKey_L)) {
+            ImGui::StyleColorsLight(nullptr);
+        } else if (ImGui::IsKeyDown(ImGuiKey_B)) {
+            StyleColorsBlack();
+        } else if (ImGui::IsKeyDown(ImGuiKey_F)) {
+            StyleColorsFunky();
+        }
+    }
+}
+
+bool ShouldRemainOpen() {
+    return !glfwWindowShouldClose(window);
+}
+
+void MainLoop() {
+    while (ShouldRemainOpen()) {
+        HandleKeys();
+        HandleLLDBProcessEvents();
+
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+
+        Draw();
+
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+}
+
 void SetupLoop() {
-    SetStyles();
+    StyleColorsBlack();
 }
 
 void TearDownGraphics() {
@@ -574,7 +686,7 @@ void SetupGraphics() {
     // glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // 3.0+ only
 #endif
 
-    window = glfwCreateWindow(640, 480, "hook", NULL, NULL);
+    window = glfwCreateWindow(480, 640, "hook", NULL, NULL);
     if (window == NULL) {
         throw std::runtime_error("Could not create window");
     }
