@@ -91,53 +91,14 @@ lldb::SBListener listener;
 lldb::SBError error;
 lldb::SBProcess process;
 
+lldb::pid_t pid = 0;
+
 GLFWwindow* window = nullptr;
 
 void PublishChange(const VariableInfo& varInfo) {
     current_var_info = &varInfo;
     published_changes = false;
     process.Stop();
-}
-
-void DisplayVariable(const VariableInfo& varInfo) {
-    std::string prefix = !varInfo.IsRoot() ? "" : varInfo.function_name.empty() ? "" : "(" + varInfo.function_name + ") ";
-    ImGui::Text("%s%s =", prefix.c_str(), varInfo.name.c_str());
-    ImGui::SameLine();
-
-    if (varInfo.IsAggregateType()) {
-        std::string treeNodeLabel = "##varname" + std::to_string(varInfo.id);
-        if (ImGui::TreeNode(treeNodeLabel.c_str())) {
-            for (auto childVar : varInfo.children) {
-                DisplayVariable(*childVar);
-            }
-            ImGui::TreePop();
-        }
-    } else {
-        std::string inputTextLabel = "##varname" + varInfo.function_name + varInfo.name;
-        if (varInfo.basic_type == lldb::eBasicTypeBool) {
-            bool value = varInfo.value == "true";
-            ImGui::Checkbox(inputTextLabel.c_str(), &value);
-            const_cast<std::string&>(varInfo.value) = value ? "true" : "false";
-        } else if (varInfo.basic_type == lldb::eBasicTypeUnsignedChar) {
-            uint8_t value = std::stoul(varInfo.value);
-            int value_int = value;
-            ImGui::SliderInt(inputTextLabel.c_str(), &value_int, std::numeric_limits<uint8_t>::min(), std::numeric_limits<uint8_t>::max());
-            const_cast<std::string&>(varInfo.value) = std::to_string(value_int);
-        } else {
-            ImGui::InputText(inputTextLabel.c_str(), const_cast<std::string*>(&varInfo.value));
-        }
-        if (ImGui::IsItemDeactivatedAfterEdit()) {
-            PublishChange(varInfo);
-        }
-    }
-}
-
-void Draw() {
-    for (auto& var : variables) {
-        if (var.IsRoot()) {
-            DisplayVariable(var);
-        }
-    }
 }
 
 lldb::SBValue FindVariableById(lldb::SBFrame& frame, uint64_t id) {
@@ -186,22 +147,37 @@ std::vector<lldb::SBFrame> GetFrames(lldb::SBThread& thread) {
     return frames;
 }
 
-void UpdateVariableValue(const VariableInfo* var_info) {
-    auto thread = GetThread(process);
-    if (!thread) return;
+void DisplayVariable(const VariableInfo& varInfo) {
+    std::string prefix = !varInfo.IsRoot() ? "" : varInfo.function_name.empty() ? "" : "(" + varInfo.function_name + ") ";
+    ImGui::Text("%s%s =", prefix.c_str(), varInfo.name.c_str());
+    ImGui::SameLine();
 
-    std::string fully_qualified_name = var_info->GetFullyQualifiedName();
-    std::string expression = fully_qualified_name + " = " + var_info->value;
-
-    for (auto& frame : GetFrames(thread)) {
-        lldb::SBValue var = FindVariableById(frame, var_info->GetRoot().id);
-        if (!var) continue;
-
-        lldb::SBValue value = frame.EvaluateExpression(expression.c_str());
-        if (value && value.GetValue()) return;
+    if (varInfo.IsAggregateType()) {
+        std::string treeNodeLabel = "##varname" + std::to_string(varInfo.id);
+        if (ImGui::TreeNode(treeNodeLabel.c_str())) {
+            for (auto childVar : varInfo.children) {
+                DisplayVariable(*childVar);
+            }
+            ImGui::TreePop();
+        }
+    } else {
+        std::string inputTextLabel = "##varname" + varInfo.function_name + varInfo.name;
+        if (varInfo.basic_type == lldb::eBasicTypeBool) {
+            bool value = varInfo.value == "true";
+            ImGui::Checkbox(inputTextLabel.c_str(), &value);
+            const_cast<std::string&>(varInfo.value) = value ? "true" : "false";
+        } else if (varInfo.basic_type == lldb::eBasicTypeUnsignedChar) {
+            uint8_t value = std::stoul(varInfo.value);
+            int value_int = value;
+            ImGui::SliderInt(inputTextLabel.c_str(), &value_int, std::numeric_limits<uint8_t>::min(), std::numeric_limits<uint8_t>::max());
+            const_cast<std::string&>(varInfo.value) = std::to_string(value_int);
+        } else {
+            ImGui::InputText(inputTextLabel.c_str(), const_cast<std::string*>(&varInfo.value));
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            PublishChange(varInfo);
+        }
     }
-
-    std::cerr << "Failed to update value of " << var_info->GetFullyQualifiedName() << std::endl;
 }
 
 void FetchNestedMembers(lldb::SBValue& aggregateValue, VariableInfo& parent) {
@@ -248,6 +224,119 @@ void FetchAllVariables() {
             }
         }
     }
+}
+
+void AttachToProcess(lldb::SBAttachInfo& attachInfo) {
+    target = debugger.CreateTarget("");
+    process = target.Attach(attachInfo, error);
+    if (!process.IsValid() || error.Fail()) {
+        throw std::runtime_error(std::string("Failed to attach to process: ") + error.GetCString());
+    }
+}
+
+void AttachToProcessWithID(lldb::pid_t pid) {
+    lldb::SBAttachInfo attachInfo;
+    attachInfo.SetProcessID(pid);
+    AttachToProcess(attachInfo);
+}
+
+void SetupEventListener() {
+    listener = debugger.GetListener();
+    auto event_mask = lldb::SBProcess::eBroadcastBitStateChanged;
+    auto event_bits = process.GetBroadcaster().AddListener(listener, event_mask);
+    if (event_bits != event_mask) {
+        throw std::runtime_error("Could not set up event listener");
+    }
+}
+
+void HandleAttachProcess() {
+    AttachToProcessWithID(pid);
+    SetupEventListener();
+    FetchAllVariables();
+    process.Continue();
+}
+
+void Draw() {
+    ImGui::NewFrame();
+
+    ImGuiIO& io = ImGui::GetIO();
+    ImGui::SetNextWindowSize(io.DisplaySize);
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+
+    if (!ImGui::Begin("Variables", nullptr, ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
+        ImGui::End();
+        return;
+    }
+    
+    bool open_pid_popup = false;
+    if (ImGui::BeginMenuBar()) {
+        if (ImGui::BeginMenu("File")) {
+            if (ImGui::MenuItem("Attach with PID")) {
+                open_pid_popup = true;
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
+    }
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    
+    if (ImGui::BeginPopup("AttachWithPID", ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove)) {
+        static bool attach_failed = false;
+
+        std::string pidInput;
+        pidInput.reserve(64);
+        ImGui::Text("PID:");
+        ImGui::SameLine();
+        ImGui::SetKeyboardFocusHere();
+        if (ImGui::InputText("##pid", &pidInput, ImGuiInputTextFlags_EnterReturnsTrue)) {
+            pid = std::stoull(pidInput);
+            try {
+                HandleAttachProcess();
+                ImGui::CloseCurrentPopup();
+                attach_failed = false;
+            } catch (...) {
+                attach_failed = true;
+            }
+        }
+        if (attach_failed) {
+            ImGui::TextDisabled("(!) Could not attach to pid %llu", pid);
+        }
+        ImGui::EndPopup();
+    }
+
+    if (open_pid_popup) {
+        open_pid_popup = false;
+        ImGui::OpenPopup("AttachWithPID");
+    }
+
+    for (auto& var : variables) {
+        if (var.IsRoot()) {
+            DisplayVariable(var);
+        }
+    }
+
+    ImGui::End();
+    ImGui::Render();
+}
+
+void UpdateVariableValue(const VariableInfo* var_info) {
+    auto thread = GetThread(process);
+    if (!thread) return;
+
+    std::string fully_qualified_name = var_info->GetFullyQualifiedName();
+    std::string expression = fully_qualified_name + " = " + var_info->value;
+
+    for (auto& frame : GetFrames(thread)) {
+        lldb::SBValue var = FindVariableById(frame, var_info->GetRoot().id);
+        if (!var) continue;
+
+        lldb::SBValue value = frame.EvaluateExpression(expression.c_str());
+        if (value && value.GetValue()) return;
+    }
+
+    std::cerr << "Failed to update value of " << var_info->GetFullyQualifiedName() << std::endl;
 }
 
 void HandleLLDBProcessEvents() {
@@ -305,17 +394,9 @@ void MainLoop() {
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-
-        ImGuiIO& io = ImGui::GetIO();
-        ImGui::SetNextWindowSize(io.DisplaySize);
-        ImGui::SetNextWindowPos(ImVec2(0, 0));
-        ImGui::Begin("Variables", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove);
 
         Draw();
 
-        ImGui::End();
-        ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(window);
@@ -324,27 +405,24 @@ void MainLoop() {
 
 void SetStyles() {
     auto yellow = ImVec4{0.996, 0.780, 0.008, 1.0};
-    auto dark_yellow = ImVec4{0.996, 0.780, 0.008, 1.0};
     auto blue = ImVec4{0.090, 0.729, 0.808, 1.0};
-    auto dark_blue = ImVec4{0.090, 0.729, 0.808, 1.0};
     auto green = ImVec4{0.149, 0.918, 0.694, 1.0};
     auto white = ImVec4{0.996, 0.996, 0.996, 1.0};
     auto red = ImVec4{1.000, 0.353, 0.322, 1.0};
-    auto dark_red = ImVec4{0.667f, 0.235f, 0.215f, 1.0f};
     auto dark_gray = ImVec4{0.1f, 0.1f, 0.13f, 1.0};
     auto middle_gray = ImVec4{0.5f, 0.5f, 0.5f, 1.0};
 
     auto &colors = ImGui::GetStyle().Colors;
-    colors[ImGuiCol_WindowBg] = dark_red;
-    colors[ImGuiCol_MenuBarBg] = dark_yellow;
+    colors[ImGuiCol_WindowBg] = dark_gray;
+    colors[ImGuiCol_MenuBarBg] = ImVec4{0.16f, 0.16f, 0.21f, 1.0f};
 
     // Border
     colors[ImGuiCol_Border] = ImVec4{0.44f, 0.37f, 0.61f, 0.29f};
     colors[ImGuiCol_BorderShadow] = ImVec4{0.0f, 0.0f, 0.0f, 0.24f};
 
     // Text
-    colors[ImGuiCol_Text] = white;
-    colors[ImGuiCol_TextDisabled] = middle_gray;
+    colors[ImGuiCol_Text] = ImVec4{1.0f, 1.0f, 1.0f, 1.0f};
+    colors[ImGuiCol_TextDisabled] = ImVec4{0.5f, 0.5f, 0.5f, 1.0f};
 
     // Headers
     colors[ImGuiCol_Header] = ImVec4{0.13f, 0.13f, 0.17, 1.0f};
@@ -352,17 +430,17 @@ void SetStyles() {
     colors[ImGuiCol_HeaderActive] = ImVec4{0.16f, 0.16f, 0.21f, 1.0f};
 
     // Buttons
-    colors[ImGuiCol_Button] = blue;
+    colors[ImGuiCol_Button] = ImVec4{0.13f, 0.13f, 0.17, 1.0f};
     colors[ImGuiCol_ButtonHovered] = ImVec4{0.19f, 0.2f, 0.25f, 1.0f};
     colors[ImGuiCol_ButtonActive] = ImVec4{0.16f, 0.16f, 0.21f, 1.0f};
-    colors[ImGuiCol_CheckMark] = green;
+    colors[ImGuiCol_CheckMark] = ImVec4{0.74f, 0.58f, 0.98f, 1.0f};
 
     // Popups
     colors[ImGuiCol_PopupBg] = ImVec4{0.1f, 0.1f, 0.13f, 0.92f};
 
     // Slider
-    colors[ImGuiCol_SliderGrab] = blue;
-    colors[ImGuiCol_SliderGrabActive] = dark_blue;
+    colors[ImGuiCol_SliderGrab] = ImVec4{0.44f, 0.37f, 0.61f, 0.54f};
+    colors[ImGuiCol_SliderGrabActive] = ImVec4{0.74f, 0.58f, 0.98f, 0.54f};
 
     // Frame BG
     colors[ImGuiCol_FrameBg] = ImVec4{0.13f, 0.13, 0.17, 1.0f};
@@ -408,8 +486,6 @@ void SetStyles() {
 
 void SetupLoop() {
     SetStyles();
-    FetchAllVariables();
-    process.Continue();
 }
 
 void TearDownGraphics() {
@@ -459,53 +535,18 @@ void SetupGraphics() {
     ImGui_ImplOpenGL3_Init(glsl_version);
 }
 
-void SetupEventListener() {
-    listener = debugger.GetListener();
-    auto event_mask = lldb::SBProcess::eBroadcastBitStateChanged;
-    auto event_bits = process.GetBroadcaster().AddListener(listener, event_mask);
-    if (event_bits != event_mask) {
-        throw std::runtime_error("Could not set up event listener");
-    }
-}
-
-void AttachToProcess(lldb::SBAttachInfo& attachInfo) {
-    target = debugger.CreateTarget("");
-    process = target.Attach(attachInfo, error);
-    if (!process.IsValid() || error.Fail()) {
-        throw std::runtime_error(std::string("Failed to attach to process: ") + error.GetCString());
-    }
-}
-
-void AttachToProcessWithID(lldb::pid_t pid) {
-    lldb::SBAttachInfo attachInfo;
-    attachInfo.SetProcessID(pid);
-    AttachToProcess(attachInfo);
-}
-
 void TearDownDebugger() {
     lldb::SBDebugger::Destroy(debugger);
 }
 
-void SetupDebugger(const std::string& process_string) {
+void SetupDebugger() {
     lldb::SBDebugger::Initialize();
     debugger = lldb::SBDebugger::Create();
-
-    lldb::pid_t pid = std::stol(process_string);
-    AttachToProcessWithID(pid);
-
-    SetupEventListener();
 }
 
 int main(int argc, char** argv) {
-    if (argc != 2) {
-        std::cerr << "Usage: " << argv[0] << " <pid>" << std::endl;
-        return -1;
-    }
-
-    std::string process_string = argv[1];
-
     try {
-        SetupDebugger(process_string);
+        SetupDebugger();
         SetupGraphics();
 
         SetupLoop();
