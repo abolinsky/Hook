@@ -23,7 +23,8 @@ struct VariableInfo {
         while (type.GetTypeClass() == lldb::eTypeClassTypedef) {
             this->type.GetTypedefedType();
         }
-
+        this->type_name = this->type.GetName();
+        this->type_class = this->type.GetTypeClass();
         this->basic_type = this->type.GetBasicType();
         if (this->basic_type == lldb::eBasicTypeUnsignedChar) {
             value.SetFormat(lldb::Format::eFormatDecimal);
@@ -39,6 +40,14 @@ struct VariableInfo {
 
     bool IsAggregateType() const {
         return is_nested;
+    }
+
+    std::string GetFullyQualifiedValue() const {
+        if (type_class == lldb::eTypeClassEnumeration) {
+            return type_name + "::" + value;
+        } else {
+            return value;
+        }
     }
 
     const VariableInfo& GetRoot() const {
@@ -74,6 +83,8 @@ struct VariableInfo {
     std::string function_name;
     std::string value;
     lldb::SBType type;
+    std::string type_name;
+    lldb::TypeClass type_class;
     lldb::BasicType basic_type;
     bool is_nested = false;
     uint64_t id = std::numeric_limits<uint64_t>::max();
@@ -94,6 +105,16 @@ lldb::SBProcess process;
 lldb::pid_t pid = 0;
 
 GLFWwindow* window = nullptr;
+
+void HelpMarker(const char* desc) {
+    ImGui::TextDisabled("(?)");
+    if (ImGui::BeginItemTooltip()) {
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 35.0f);
+        ImGui::TextUnformatted(desc);
+        ImGui::PopTextWrapPos();
+        ImGui::EndTooltip();
+    }
+}
 
 void PublishChange(const VariableInfo& varInfo) {
     current_var_info = &varInfo;
@@ -147,7 +168,7 @@ std::vector<lldb::SBFrame> GetFrames(lldb::SBThread& thread) {
     return frames;
 }
 
-void DisplayVariable(const VariableInfo& varInfo) {
+void DisplayVariable(VariableInfo& varInfo) {
     std::string prefix = !varInfo.IsRoot() ? "" : varInfo.function_name.empty() ? "" : "(" + varInfo.function_name + ") ";
     ImGui::Text("%s%s =", prefix.c_str(), varInfo.name.c_str());
     ImGui::SameLine();
@@ -162,20 +183,51 @@ void DisplayVariable(const VariableInfo& varInfo) {
         }
     } else {
         std::string inputTextLabel = "##varname" + varInfo.function_name + varInfo.name;
-        if (varInfo.basic_type == lldb::eBasicTypeBool) {
+        if (varInfo.type_class == lldb::eTypeClassEnumeration) {
+            auto members = varInfo.type.GetEnumMembers();
+            auto num_members = members.GetSize();
+            std::vector<std::string> member_names;
+            for (unsigned i = 0; i < num_members; ++i) {
+                auto current_enum_member = members.GetTypeEnumMemberAtIndex(i);
+                if (current_enum_member.IsValid() && std::string(current_enum_member.GetName()) != "") {
+                    member_names.push_back(current_enum_member.GetName());
+                }
+            }
+            int index = 0;
+            for (auto& n : member_names) {
+                if (varInfo.value == n) {
+                    std::string inputTextLabel = "##sliderEnum" + varInfo.name;
+                    ImGui::SliderInt(inputTextLabel.c_str(), &index, 0, member_names.size() - 1, member_names[index].c_str());
+                    varInfo.value = member_names[index];
+                    break;
+                }
+                ++index;
+            }
+            if (ImGui::IsItemDeactivatedAfterEdit()) {
+                PublishChange(varInfo);
+            }
+        } else if (varInfo.basic_type == lldb::eBasicTypeBool) {
             bool value = varInfo.value == "true";
             ImGui::Checkbox(inputTextLabel.c_str(), &value);
-            const_cast<std::string&>(varInfo.value) = value ? "true" : "false";
+            varInfo.value = value ? "true" : "false";
+            if (ImGui::IsItemDeactivatedAfterEdit()) {
+                PublishChange(varInfo);
+            }
         } else if (varInfo.basic_type == lldb::eBasicTypeUnsignedChar) {
             uint8_t value = std::stoul(varInfo.value);
-            int value_int = value;
-            ImGui::SliderInt(inputTextLabel.c_str(), &value_int, std::numeric_limits<uint8_t>::min(), std::numeric_limits<uint8_t>::max());
-            const_cast<std::string&>(varInfo.value) = std::to_string(value_int);
+            static auto min = std::numeric_limits<uint8_t>::min();
+            static auto max = std::numeric_limits<uint8_t>::max();
+            ImGui::SliderScalar(inputTextLabel.c_str(), ImGuiDataType_U8, &value, &min , &max);
+            if (ImGui::IsItemDeactivatedAfterEdit()) {
+                PublishChange(varInfo);
+            }
+            ImGui::SameLine(); HelpMarker("CTRL+click to input value");
+            varInfo.value = std::to_string(value);
         } else {
-            ImGui::InputText(inputTextLabel.c_str(), const_cast<std::string*>(&varInfo.value));
-        }
-        if (ImGui::IsItemDeactivatedAfterEdit()) {
-            PublishChange(varInfo);
+            ImGui::InputText(inputTextLabel.c_str(), &varInfo.value);
+            if (ImGui::IsItemDeactivatedAfterEdit()) {
+                PublishChange(varInfo);
+            }
         }
     }
 }
@@ -268,7 +320,7 @@ void Draw() {
         return;
     }
     
-    bool open_pid_popup = false;
+    static bool open_pid_popup = true;
     if (ImGui::BeginMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Attach with PID")) {
@@ -300,6 +352,8 @@ void Draw() {
                 attach_failed = true;
             }
         }
+        // TODO: progress bar
+
         if (attach_failed) {
             ImGui::TextDisabled("(!) Could not attach to pid %llu", pid);
         }
@@ -326,7 +380,7 @@ void UpdateVariableValue(const VariableInfo* var_info) {
     if (!thread) return;
 
     std::string fully_qualified_name = var_info->GetFullyQualifiedName();
-    std::string expression = fully_qualified_name + " = " + var_info->value;
+    std::string expression = fully_qualified_name + " = " + var_info->GetFullyQualifiedValue();
 
     for (auto& frame : GetFrames(thread)) {
         lldb::SBValue var = FindVariableById(frame, var_info->GetRoot().id);
@@ -336,7 +390,7 @@ void UpdateVariableValue(const VariableInfo* var_info) {
         if (value && value.GetValue()) return;
     }
 
-    std::cerr << "Failed to update value of " << var_info->GetFullyQualifiedName() << std::endl;
+    std::cerr << "Failed to evaluate " << expression << std::endl;
 }
 
 void HandleLLDBProcessEvents() {
