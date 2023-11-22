@@ -3,10 +3,9 @@
 </p>
 
 # hook
-A **graphical C/C++ runtime editor** for rapid experimentation. It attaches to your running program and allows you to change the value of variables live, breaking the time-consuming edit-compile-run-edit cycle.
+A **graphical C/C++ runtime editor** for rapid experimentation. It attaches to your running program and allows you to easily change the value of variables live, breaking the time-consuming edit-compile-run-edit cycle.
 
-# in action
-<img width="1728" alt="hook_in_action" src="https://github.com/abolinsky/hook/assets/5623716/eb64e787-af1e-4388-af1c-0091c0057322">
+<img width="1141" alt="hook_in_action" src="https://github.com/abolinsky/hook/assets/5623716/0f699866-4934-4e79-991b-07e6579bed36">
 
 # status
 Work in progress!
