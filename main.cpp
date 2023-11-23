@@ -103,8 +103,6 @@ lldb::SBProcess process;
 
 lldb::pid_t pid = 0;
 
-GLFWwindow* window = nullptr;
-
 void HelpMarker(const char* desc) {
     ImGui::TextDisabled("(?)");
     if (ImGui::BeginItemTooltip()) {
@@ -319,13 +317,9 @@ void HandleAttachProcess() {
 
 void StyleColorsFunky() {
     auto yellow = ImVec4{0.996, 0.780, 0.008, 1.0};
-    auto dark_yellow = ImVec4{0.664, 0.520, 0.005, 1.0};
     auto blue = ImVec4{0.090, 0.729, 0.808, 1.0};
     auto green = ImVec4{0.149, 0.918, 0.694, 1.0};
     auto white = ImVec4{0.996, 0.996, 0.996, 1.0};
-    auto red = ImVec4{1.000, 0.353, 0.322, 1.0};
-    auto dark_red = ImVec4{0.666, 0.235, 0.215, 1.0};
-    auto dark_gray = ImVec4{0.1f, 0.1f, 0.13f, 1.0};
     auto middle_gray = ImVec4{0.5f, 0.5f, 0.5f, 1.0};
     auto light_gray = ImVec4{0.85f, 0.85f, 0.85f, 1.0};
     auto off_white = ImVec4{0.96f, 0.96f, 0.96f, 1.0};
@@ -405,16 +399,8 @@ void StyleColorsFunky() {
 }
 
 void StyleColorsBlack() {
-    auto yellow = ImVec4{0.996, 0.780, 0.008, 1.0};
-    auto blue = ImVec4{0.090, 0.729, 0.808, 1.0};
-    auto green = ImVec4{0.149, 0.918, 0.694, 1.0};
-    auto white = ImVec4{0.996, 0.996, 0.996, 1.0};
-    auto red = ImVec4{1.000, 0.353, 0.322, 1.0};
-    auto dark_gray = ImVec4{0.1f, 0.1f, 0.13f, 1.0};
-    auto middle_gray = ImVec4{0.5f, 0.5f, 0.5f, 1.0};
-
     auto &colors = ImGui::GetStyle().Colors;
-    colors[ImGuiCol_WindowBg] = dark_gray;
+    colors[ImGuiCol_WindowBg] = ImVec4{0.1f, 0.1f, 0.13f, 1.0};
     colors[ImGuiCol_MenuBarBg] = ImVec4{0.16f, 0.16f, 0.21f, 1.0f};
 
     // Border

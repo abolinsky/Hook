@@ -1,3 +1,5 @@
 *.dSYM
-hook
 .vscode
+*.gch
+*.ini
+build
