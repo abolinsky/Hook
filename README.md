@@ -8,13 +8,13 @@ A **graphical C/C++ runtime editor** for rapid experimentation. It attaches to y
 <img width="1141" alt="hook_in_action" src="https://github.com/abolinsky/hook/assets/5623716/0f699866-4934-4e79-991b-07e6579bed36">
 
 # dependencies
-## macOS
-### glfw
+## glfw
+### macOS
 ```
 brew install glfw
 ```
 
-### lldb
+## lldb
 https://lldb.llvm.org/resources/build.html
 
 # build
