@@ -1,1 +1,18 @@
-g++ -std=c++20 -g -o hook main.cpp dependencies/imgui/*cpp dependencies/imgui/backends/*cpp -Idependencies/imgui/ -Idependencies/imgui/backends -I/opt/homebrew/Cellar/glfw/3.3.8/include -L/opt/homebrew/Cellar/glfw/3.3.8/lib -I/usr/local/include/lldb/ -L/usr/local/lib/lldb/ -lglfw -llldb -Wl,-rpath,/usr/local/lib/lldb
+CXX="clang++"
+EXE="hook"
+IMGUI_DIR="dependencies/imgui"
+
+SOURCES="main.cpp "
+SOURCES+="$IMGUI_DIR/imgui.cpp $IMGUI_DIR/imgui_stdlib.cpp $IMGUI_DIR/imgui_draw.cpp $IMGUI_DIR/imgui_tables.cpp $IMGUI_DIR/imgui_widgets.cpp "
+SOURCES+="$IMGUI_DIR/backends/imgui_impl_glfw.cpp $IMGUI_DIR/backends/imgui_impl_metal.mm "
+
+INCLUDES="-I$IMGUI_DIR -I$IMGUI_DIR/backends "
+
+LIBS="-framework Metal -framework MetalKit -framework Cocoa -framework IOKit -framework CoreVideo -framework QuartzCore "
+LIBS+="-I/usr/local/include/lldb -L/usr/local/lib/lldb -llldb "
+LIBS+="-I/opt/homebrew/include -L/opt/homebrew/lib -lglfw "
+
+CXXFLAGS="-std=c++20 -ObjC++ "
+CXXFLAGS+="-Wall -Wformat -Wl,-rpath,/usr/local/lib/lldb"
+
+$CXX $CXXFLAGS $LIBS $SOURCES $INCLUDES -o $EXE

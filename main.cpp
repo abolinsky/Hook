@@ -1,9 +1,7 @@
 #include "imgui.h"
 #include "imgui_stdlib.h"
-#include "imgui_impl_glfw.h"
-#include "imgui_impl_opengl3.h"
+#include "backend.h"
 
-#include <GLFW/glfw3.h>
 #include <lldb/API/LLDB.h>
 
 #include <iostream>
@@ -629,76 +627,16 @@ void HandleKeys() {
     }
 }
 
-bool ShouldRemainOpen() {
-    return !glfwWindowShouldClose(window);
-}
-
-void MainLoop() {
-    while (ShouldRemainOpen()) {
-        HandleKeys();
-        HandleLLDBProcessEvents();
-
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-
-        Draw();
-
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-        glfwSwapBuffers(window);
-        glfwPollEvents();
-    }
+void core() {
+    HandleKeys();
+    HandleLLDBProcessEvents();
+    Draw();
 }
 
 void SetupLoop() {
-    StyleColorsBlack();
-}
-
-void TearDownGraphics() {
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-
-    glfwDestroyWindow(window);
-    glfwTerminate();
-}
-
-void SetupGraphics() {
-    if (!glfwInit()) {
-        throw std::runtime_error("Could not initialize graphics");
-    }
-
-    // Decide GL+GLSL versions
-#if __APPLE__
-    // GL 3.2 + GLSL 150
-    const char* glsl_version = "#version 150";
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // Required on Mac
-    glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_TRUE);
-#else
-    // GL 3.0 + GLSL 130
-    const char* glsl_version = "#version 130";
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-    // glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
-    // glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // 3.0+ only
-#endif
-
-    window = glfwCreateWindow(480, 640, "hook", NULL, NULL);
-    if (window == NULL) {
-        throw std::runtime_error("Could not create window");
-    }
-
-    glfwMakeContextCurrent(window);
-    glfwSwapInterval(1); // Enable vsync
-
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init(glsl_version);
+    StyleColorsBlack();
 }
 
 void TearDownDebugger() {
@@ -710,15 +648,11 @@ void SetupDebugger() {
     debugger = lldb::SBDebugger::Create();
 }
 
-int main(int argc, char** argv) {
+int main() {
     try {
         SetupDebugger();
-        SetupGraphics();
-
         SetupLoop();
-        MainLoop();
-
-        TearDownGraphics();
+        main_loop(core);
         TearDownDebugger();
     } catch (const std::exception& e) {
         std::cout << e.what() << std::endl;
