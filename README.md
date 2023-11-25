@@ -7,20 +7,20 @@ A **graphical C/C++ runtime editor** for rapid experimentation. It attaches to y
 
 <img width="1141" alt="hook_in_action" src="https://github.com/abolinsky/hook/assets/5623716/0f699866-4934-4e79-991b-07e6579bed36">
 
-# dependencies
-## glfw
-### macOS
+# build from source
+## install dependencies
+### glfw
+#### macOS
 ```
 brew install glfw
 ```
 
-## lldb
-https://lldb.llvm.org/resources/build.html
+### lldb
+Follow the official lldb build instructions [here](https://lldb.llvm.org/resources/build.html).
 
-# build
-This assumes `lldb`'s library files and header files are installed in `/usr/local/lib` and `/usr/local/include`, respectively.
+## build
 ```
-cmake -DCMAKE_LIBRARY_PATH="/usr/local/lib" -DCMAKE_INCLUDE_PATH="/usr/local/include" -B build -S .
+cmake -DCMAKE_LIBRARY_PATH="/path/to/lldb/lib" -DCMAKE_INCLUDE_PATH="/path/to/lldb/include" -B build -S .
 cmake --build build
 sudo cmake --install build
 ```
