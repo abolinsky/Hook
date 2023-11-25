@@ -33,7 +33,15 @@ set(OBJC_SOURCES
     backend.cpp
 )
 
-add_executable(hook ${SOURCES} ${OBJC_SOURCES})
+#add_executable(hook ${SOURCES} ${OBJC_SOURCES})
+set(APP_ICON_MACOSX resources/icons/hook.icns)
+set_source_files_properties(${APP_ICON_MACOSX} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+
+add_executable(hook MACOSX_BUNDLE ${SOURCES} ${OBJC_SOURCES} ${APP_ICON_MACOSX})
+
+set_target_properties(hook PROPERTIES
+    MACOSX_BUNDLE_ICON_FILE hook.icns
+)
 
 target_link_libraries(hook ${LLDB_LIB} glfw "-framework Metal" "-framework MetalKit" "-framework Cocoa" "-framework IOKit" "-framework CoreVideo" "-framework QuartzCore")
 
