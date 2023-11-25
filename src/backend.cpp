@@ -24,7 +24,7 @@ void main_loop(void (*user_function)()) {
 
     // Create window with graphics context
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow* window = glfwCreateWindow(440, 720, "hook", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(440, 720, "Hook", nullptr, nullptr);
     if (window == nullptr)
         return;
 
