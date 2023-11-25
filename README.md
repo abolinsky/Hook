@@ -18,8 +18,9 @@ brew install glfw
 https://lldb.llvm.org/resources/build.html
 
 # build
+This assumes `lldb`'s library files and header files are installed in `/usr/local/lib` and `/usr/local/include`, respectively.
 ```
-cmake -B build -S .
+cmake -DCMAKE_LIBRARY_PATH="/usr/local/lib" -DCMAKE_INCLUDE_PATH="/usr/local/include" -B build -S .
 cmake --build build
 sudo cmake --install build
 ```

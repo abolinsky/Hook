@@ -10,12 +10,12 @@ enable_language(OBJCXX)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wformat")
 
 set(IMGUI_DIR "${CMAKE_SOURCE_DIR}/dependencies/imgui")
+include_directories(${CMAKE_SOURCE_DIR})
 include_directories(${IMGUI_DIR})
 include_directories(${IMGUI_DIR}/backends)
-include_directories(/usr/local/include)
-include_directories(.)
+include_directories(${CMAKE_INCLUDE_PATH})
 
-find_library(LLDB_LIB lldb REQUIRED PATHS /usr/local/lib/lldb)
+find_library(LLDB_LIB lldb REQUIRED PATHS ${CMAKE_LIBRARY_PATH})
 find_package(glfw3 REQUIRED)
 
 set(SOURCES
