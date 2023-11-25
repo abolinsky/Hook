@@ -3,3 +3,4 @@
 *.gch
 *.ini
 build
+.DS_Store
