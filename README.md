@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="256" height="256" src="https://github.com/abolinsky/hook/assets/5623716/6dcca51d-8cd3-4e87-b2f9-59be47c76def"/>
+  <img width="256" height="256" src="./resources/icons/hook.svg"/>
 </p>
 
 # hook
