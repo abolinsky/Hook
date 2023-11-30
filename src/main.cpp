@@ -1,5 +1,7 @@
 #include "backend.h"
 
+#include <mach-o/dyld.h>
+
 #include <imgui.h>
 #include <imgui_stdlib.h>
 
@@ -11,7 +13,29 @@
 #include <sstream>
 #include <limits>
 
+
 namespace Hook {
+
+std::string GetExecutablePath() {
+    char path[PATH_MAX];
+    uint32_t size = sizeof(path);
+    if (_NSGetExecutablePath(path, &size) != 0) {
+        throw std::runtime_error("Could not get executable path");
+    }
+
+    return std::string(path);
+}
+
+std::string GetDebugServerPath() {
+    std::string executablePath = GetExecutablePath();
+    size_t appDirPos = executablePath.find(".app");
+    if (appDirPos == std::string::npos) {
+        throw std::runtime_error("Could not get debugserver path");
+    }
+
+    std::string debugServerPath = executablePath.substr(0, appDirPos) + ".app/Contents/Frameworks/debugserver";
+    return debugServerPath;
+}
 
 struct VariableInfo {
     VariableInfo(lldb::SBValue& value) {
@@ -633,6 +657,7 @@ void TearDownDebugger() {
 }
 
 void SetupDebugger() {
+    setenv("LLDB_DEBUGSERVER_PATH", GetDebugServerPath().c_str(), 1);
     lldb::SBDebugger::Initialize();
     debugger = lldb::SBDebugger::Create();
 }

@@ -28,7 +28,16 @@ include(ExternalProject)
 ExternalProject_Add(${PROJECT_NAME}-llvm
     SOURCE_DIR          ${CMAKE_CURRENT_SOURCE_DIR}/external/llvm-project/llvm
     BINARY_DIR          ${PROJECT_BINARY_DIR}/llvm-build
-    CONFIGURE_COMMAND   ${CMAKE_COMMAND} -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS=clang ${CMAKE_CURRENT_SOURCE_DIR}/external/llvm-project/llvm
+    CONFIGURE_COMMAND   ${CMAKE_COMMAND}
+        -G Ninja
+        -DCMAKE_BUILD_TYPE=Release
+        -DLLVM_ENABLE_PROJECTS=clang
+        -DLLVM_ENABLE_TERMINFO=OFF
+        -DLLVM_ENABLE_IDE=OFF
+        -DLLVM_ENABLE_LIBXML2=OFF
+        -DLLVM_ENABLE_LIBEDIT=OFF
+        -DLLVM_TARGETS_TO_BUILD=ARM
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/llvm-project/llvm
     BUILD_COMMAND       ninja
     INSTALL_COMMAND     ""
     TEST_COMMAND        ""
@@ -43,8 +52,13 @@ ExternalProject_Add(${PROJECT_NAME}-lldb
         -DCMAKE_BUILD_TYPE=Release
         -DLLVM_DIR=${PROJECT_BINARY_DIR}/llvm-build/lib/cmake/llvm
         -DLLDB_INCLUDE_TESTS=OFF
+        -DLLDB_ENABLE_PYTHON=OFF
+        -DLLDB_ENABLE_CURSES=OFF
+        -DLLDB_ENABLE_TERMIOS=OFF
+        -DLLDB_ENABLE_LIBEDIT=OFF
+        -DLLDB_ENABLE_LIBXML2=OFF
         ${CMAKE_CURRENT_SOURCE_DIR}/external/llvm-project/lldb
-    BUILD_COMMAND       ninja lldb
+    BUILD_COMMAND       ninja lldb debugserver
     INSTALL_COMMAND     ""
     TEST_COMMAND        ""
     DEPENDS             ${PROJECT_NAME}-llvm-build
@@ -68,9 +82,20 @@ set(OBJC_SOURCES
 )
 
 set(APP_ICON_MACOSX resources/icons/hook.icns)
-set_source_files_properties(${APP_ICON_MACOSX} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
-add_executable(${PROJECT_NAME} MACOSX_BUNDLE ${CPP_SOURCES} ${OBJC_SOURCES} ${APP_ICON_MACOSX})
-set_target_properties(${PROJECT_NAME} PROPERTIES MACOSX_BUNDLE_ICON_FILE hook.icns)
+
+set_source_files_properties(${APP_ICON_MACOSX} PROPERTIES
+    MACOSX_PACKAGE_LOCATION "Resources"
+)
+
+add_executable(${PROJECT_NAME} MACOSX_BUNDLE
+    ${CPP_SOURCES}
+    ${OBJC_SOURCES}
+    ${APP_ICON_MACOSX}
+)
+
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    MACOSX_BUNDLE_ICON_FILE hook.icns
+)
 
 configure_file(src/config.h.in config.h)
 
@@ -105,4 +130,9 @@ set_source_files_properties(${OBJC_SOURCES} PROPERTIES
     COMPILE_FLAGS "-x objective-c++"
 )
 
-install(TARGETS ${PROJECT_NAME} BUNDLE DESTINATION /Applications COMPONENT Applications)
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${PROJECT_NAME}>/../Frameworks
+    COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_BINARY_DIR}/lldb-build/bin/debugserver $<TARGET_FILE_DIR:${PROJECT_NAME}>/../Frameworks/
+    COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_BINARY_DIR}/lldb-build/lib/liblldb.17.0.4.dylib $<TARGET_FILE_DIR:${PROJECT_NAME}>/../Frameworks/
+    COMMAND ${CMAKE_INSTALL_NAME_TOOL} -change @rpath/liblldb.17.0.4.dylib @executable_path/../Frameworks/liblldb.17.0.4.dylib $<TARGET_FILE:${PROJECT_NAME}>
+)
