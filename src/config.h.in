@@ -1,0 +1,19 @@
+#pragma once
+
+#include <string>
+
+namespace project {
+
+struct Version {
+    int major = @PROJECT_VERSION_MAJOR@;
+    int minor = @PROJECT_VERSION_MINOR@;
+    int patch = @PROJECT_VERSION_PATCH@;
+
+    std::string to_string() const {
+        return "@PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@PROJECT_VERSION_PATCH@";
+    }
+} version;
+
+std::string name { "@PROJECT_NAME@" };
+
+}

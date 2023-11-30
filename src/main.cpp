@@ -1,6 +1,7 @@
-#include "imgui.h"
-#include "imgui_stdlib.h"
 #include "backend.h"
+
+#include <imgui.h>
+#include <imgui_stdlib.h>
 
 #include <lldb/API/LLDB.h>
 
@@ -10,6 +11,7 @@
 #include <sstream>
 #include <limits>
 
+namespace Hook {
 
 struct VariableInfo {
     VariableInfo(lldb::SBValue& value) {
@@ -529,7 +531,8 @@ void Draw() {
                 HandleAttachProcess();
                 ImGui::CloseCurrentPopup();
                 attach_failed = false;
-            } catch (...) {
+            } catch (const std::exception& e) {
+                std::cerr << e.what() << std::endl;
                 attach_failed = true;
             }
         }
@@ -634,7 +637,10 @@ void SetupDebugger() {
     debugger = lldb::SBDebugger::Create();
 }
 
+}
+
 int main() {
+    using namespace Hook;
     try {
         SetupDebugger();
         SetupLoop();

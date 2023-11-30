@@ -1,0 +1,9 @@
+[submodule "external/imgui"]
+	path = external/imgui
+	url = git@github.com:ocornut/imgui.git
+[submodule "external/glfw"]
+	path = external/glfw
+	url = git@github.com:glfw/glfw.git
+[submodule "external/llvm-project"]
+	path = external/llvm-project
+	url = git@github.com:llvm/llvm-project.git

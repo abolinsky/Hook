@@ -2,6 +2,8 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_metal.h"
 
+#include "config.h"
+
 #define GLFW_INCLUDE_NONE
 #define GLFW_EXPOSE_NATIVE_COCOA
 #include <GLFW/glfw3.h>
@@ -24,7 +26,8 @@ void main_loop(void (*user_function)()) {
 
     // Create window with graphics context
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow* window = glfwCreateWindow(440, 720, "Hook", nullptr, nullptr);
+    std::string title = project::name + " " + project::version.to_string();
+    GLFWwindow* window = glfwCreateWindow(440, 720, title.c_str(), nullptr, nullptr);
     if (window == nullptr)
         return;
 
