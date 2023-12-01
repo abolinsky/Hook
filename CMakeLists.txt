@@ -7,6 +7,7 @@ project(Hook
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_BUILD_TYPE RelWithDebInfo)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wformat")
 
 find_package(Git REQUIRED)
@@ -23,45 +24,30 @@ if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
    endif()
 endif()
 
+execute_process(COMMAND ${PROJECT_SOURCE_DIR}/external/llvm-project/lldb/scripts/macos-setup-codesign.sh)
+
 include(ExternalProject)
 
 ExternalProject_Add(${PROJECT_NAME}-llvm
-    SOURCE_DIR          ${CMAKE_CURRENT_SOURCE_DIR}/external/llvm-project/llvm
-    BINARY_DIR          ${PROJECT_BINARY_DIR}/llvm-build
-    CONFIGURE_COMMAND   ${CMAKE_COMMAND}
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/llvm-project/llvm
+    BINARY_DIR ${PROJECT_BINARY_DIR}/lldb-build
+    CONFIGURE_COMMAND ${CMAKE_COMMAND}
         -G Ninja
-        -DCMAKE_BUILD_TYPE=Release
-        -DLLVM_ENABLE_PROJECTS=clang
-        -DLLVM_ENABLE_TERMINFO=OFF
-        -DLLVM_ENABLE_IDE=OFF
-        -DLLVM_ENABLE_LIBXML2=OFF
-        -DLLVM_ENABLE_LIBEDIT=OFF
-        -DLLVM_TARGETS_TO_BUILD=ARM
+        -DCMAKE_INSTALL_PREFIX=${PROJECT_BINARY_DIR}/${PROJECT_NAME}.app/Contents/Frameworks
+        -C ${CMAKE_CURRENT_SOURCE_DIR}/cmake/standalone.cmake
         ${CMAKE_CURRENT_SOURCE_DIR}/external/llvm-project/llvm
-    BUILD_COMMAND       ninja
-    INSTALL_COMMAND     ""
-    TEST_COMMAND        ""
-    STEP_TARGETS        build
-)
-
-ExternalProject_Add(${PROJECT_NAME}-lldb
-    SOURCE_DIR          ${CMAKE_CURRENT_SOURCE_DIR}/external/llvm-project/lldb
-    BINARY_DIR          ${PROJECT_BINARY_DIR}/lldb-build
-    CONFIGURE_COMMAND   ${CMAKE_COMMAND}
-        -G Ninja
-        -DCMAKE_BUILD_TYPE=Release
-        -DLLVM_DIR=${PROJECT_BINARY_DIR}/llvm-build/lib/cmake/llvm
-        -DLLDB_INCLUDE_TESTS=OFF
-        -DLLDB_ENABLE_PYTHON=OFF
-        -DLLDB_ENABLE_CURSES=OFF
-        -DLLDB_ENABLE_TERMIOS=OFF
-        -DLLDB_ENABLE_LIBEDIT=OFF
-        -DLLDB_ENABLE_LIBXML2=OFF
-        ${CMAKE_CURRENT_SOURCE_DIR}/external/llvm-project/lldb
-    BUILD_COMMAND       ninja lldb debugserver
-    INSTALL_COMMAND     ""
-    TEST_COMMAND        ""
-    DEPENDS             ${PROJECT_NAME}-llvm-build
+    BUILD_COMMAND ninja
+        -C ${PROJECT_BINARY_DIR}/lldb-build
+        lldb
+        debugserver
+        darwin-debug
+    INSTALL_COMMAND ninja
+        -C ${PROJECT_BINARY_DIR}/lldb-build
+        install-lldb
+        install-debugserver
+        install-liblldb
+        install-darwin-debug
+    TEST_COMMAND ""
 )
 
 add_subdirectory(external/glfw)
@@ -100,17 +86,17 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 configure_file(src/config.h.in config.h)
 
 target_include_directories(${PROJECT_NAME}
-    PRIVATE ${PROJECT_BINARY_DIR}
-    PRIVATE external/glfw/include
-    PRIVATE external/imgui
-    PRIVATE external/imgui/backends
-    PRIVATE external/imgui/misc/cpp
-    PRIVATE external/llvm-project/lldb/include
-    PRIVATE src
+    PUBLIC ${PROJECT_BINARY_DIR}
+    PUBLIC external/glfw/include
+    PUBLIC external/imgui
+    PUBLIC external/imgui/backends
+    PUBLIC external/imgui/misc/cpp
+    PUBLIC external/llvm-project/lldb/include
+    PUBLIC src
 )
 
 target_link_directories(${PROJECT_NAME}
-    PRIVATE ${PROJECT_BINARY_DIR}/lldb-build/lib
+    PUBLIC ${PROJECT_BINARY_DIR}/lldb-build/lib
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -131,8 +117,5 @@ set_source_files_properties(${OBJC_SOURCES} PROPERTIES
 )
 
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${PROJECT_NAME}>/../Frameworks
-    COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_BINARY_DIR}/lldb-build/bin/debugserver $<TARGET_FILE_DIR:${PROJECT_NAME}>/../Frameworks/
-    COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_BINARY_DIR}/lldb-build/lib/liblldb.17.0.4.dylib $<TARGET_FILE_DIR:${PROJECT_NAME}>/../Frameworks/
-    COMMAND ${CMAKE_INSTALL_NAME_TOOL} -change @rpath/liblldb.17.0.4.dylib @executable_path/../Frameworks/liblldb.17.0.4.dylib $<TARGET_FILE:${PROJECT_NAME}>
+    COMMAND ${CMAKE_INSTALL_NAME_TOOL} -change @rpath/liblldb.17.0.4.dylib @executable_path/../Frameworks/lib/liblldb.dylib $<TARGET_FILE:${PROJECT_NAME}>
 )

@@ -33,7 +33,7 @@ std::string GetDebugServerPath() {
         throw std::runtime_error("Could not get debugserver path");
     }
 
-    std::string debugServerPath = executablePath.substr(0, appDirPos) + ".app/Contents/Frameworks/debugserver";
+    std::string debugServerPath = executablePath.substr(0, appDirPos) + ".app/Contents/Frameworks/bin/debugserver";
     return debugServerPath;
 }
 
@@ -637,6 +637,8 @@ void HandleKeys() {
         } else if (ImGui::IsKeyDown(ImGuiKey_F)) {
             StyleColorsFunky();
         }
+    } else if (ImGui::IsKeyDown(ImGuiKey_S)) {
+        process.Stop();
     }
 }
 
