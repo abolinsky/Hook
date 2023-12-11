@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.18)
 
+set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64" CACHE STRING "" FORCE)
+
 project(Hook
     VERSION 0.1.1
     LANGUAGES CXX OBJCXX
@@ -40,13 +42,13 @@ ExternalProject_Add(${PROJECT_NAME}-llvm
         -C ${PROJECT_BINARY_DIR}/lldb-build
         lldb
         debugserver
-        darwin-debug
+        #        darwin-debug
     INSTALL_COMMAND ninja
         -C ${PROJECT_BINARY_DIR}/lldb-build
-        install-lldb
+        #install-lldb
         install-debugserver
         install-liblldb
-        install-darwin-debug
+        #install-darwin-debug
     TEST_COMMAND ""
 )
 
