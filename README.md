@@ -7,13 +7,13 @@ A **graphical C/C++ runtime editor** for rapid experimentation. It attaches to y
 
 <img width="1141" alt="hook_in_action" src="https://github.com/abolinsky/hook/assets/5623716/0f699866-4934-4e79-991b-07e6579bed36">
 
-# build
-> Warning: This will take a **very** long time. (~20 minutes on an M2 MacBook air)
+# build and install
+> Warning: This will take a long time. (~20 minutes on an M2 MacBook air)
 ```
 ./scripts/build.sh
 ```
 
 # run
 ```
-open build/Hook.app
+open -a Hook
 ```

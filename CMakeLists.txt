@@ -12,6 +12,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_BUILD_TYPE RelWithDebInfo)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wformat")
 
+if(APPLE)
+    set(CMAKE_INSTALL_PREFIX "/Applications")
+endif()
+
 find_package(Git REQUIRED)
 if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
    option(GIT_SUBMODULE "Check submodules during build" ON)
@@ -120,4 +124,9 @@ set_source_files_properties(${OBJC_SOURCES} PROPERTIES
 
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_INSTALL_NAME_TOOL} -change @rpath/liblldb.17.0.4.dylib @executable_path/../Frameworks/lib/liblldb.dylib $<TARGET_FILE:${PROJECT_NAME}>
+)
+
+set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+install(TARGETS ${PROJECT_NAME}
+    BUNDLE DESTINATION .
 )
